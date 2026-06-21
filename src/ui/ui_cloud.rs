@@ -1,5 +1,6 @@
+pub mod list_state;
+
 use std::{
-    fs,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -7,1087 +8,520 @@ use std::{
     },
 };
 
-use log::{error, info};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use log::error;
 
 use crate::{
-    api::{Api, AuthData},
+    api::{Api, CloudManifest},
     app::AppData,
-    constant::{
-        HOME_PAGE_URL, SAVE_LIST_QR_CODE_SIZE, SCAN_QR_CODE_TIPS, SCREEN_HEIGHT, SCREEN_WIDTH,
-    },
-    ime::{get_current_format_time, show_keyboard},
-    tai::{mount_pfs, unmount_pfs},
-    ui::ui_toast::Toast,
-    utils::{
-        copy_dir_all, join_path, normalize_path, update_sfo_file_with_current_account_id, zip_dir,
-        zip_extract, zip_file,
-    },
+    config::Config,
+    constant::{GAME_SAVE_LOCAL_DIR, SCREEN_HEIGHT, SCREEN_WIDTH},
+    sync::{compute_status, GameSyncEntry, SyncStatus},
+    ui::{ui_dialog::UIDialog, ui_loading::Loading, ui_settings::UISettings, ui_toast::Toast},
+    utils::{get_active_color, sha256_file},
     vita2d::{
-        is_button, rgba, vita2d_draw_text, vita2d_draw_texture, vita2d_line, vita2d_load_png_buf,
-        vita2d_load_png_file, vita2d_set_clip, vita2d_text_height, vita2d_text_width,
-        vita2d_unset_clip, SceCtrlButtons, Vita2dTexture,
+        is_button, rgba, vita2d_draw_rect, vita2d_draw_text, vita2d_line, vita2d_text_height,
+        vita2d_text_width, SceCtrlButtons,
     },
 };
 
-use self::{
-    action::{do_cloud_action, do_local_action},
-    menu::Menu,
-    panel::{DirPending, DirPendingAction, Panel},
-};
+use super::ui_base::UIBase;
 
-use super::{
-    ui_base::UIBase, ui_dialog::UIDialog, ui_loading::Loading, ui_scroll_progress::ScrollProgress,
-    ui_titles::save_menu::save_list::save_list_cloud::QrCodeState,
-};
-
-pub mod action;
-pub mod list_state;
-pub mod menu;
-pub mod panel;
+#[derive(Clone)]
+struct SyncGameInfo {
+    title_id: String,
+    name: String,
+    status: SyncStatus,
+    local_time: Option<String>,
+    cloud_time: Option<String>,
+    cloud_size: Option<u64>,
+    has_local_backup: bool,
+}
 
 pub struct UICloud {
-    pub pending: Arc<AtomicBool>,
-    pub active_panel: usize,
-    pub right_panel: usize,
-    pub panels: [Panel; 3],
-    pub no_data_tex: Option<Vita2dTexture>,
-    pub qr_code_state: QrCodeState,
-    pub menu: Menu,
-    pub scroll_progress: ScrollProgress,
+    games: Arc<RwLock<Vec<SyncGameInfo>>>,
+    selected_idx: i32,
+    top_row: i32,
+    pending: Arc<AtomicBool>,
+    cloud_manifest: Arc<RwLock<Option<CloudManifest>>>,
+    fetch_at: Arc<RwLock<u64>>,
+    show_settings: bool,
+    settings: Option<UISettings>,
 }
+
+const DISPLAY_ROWS: i32 = 14;
 
 impl UICloud {
     pub fn new() -> UICloud {
         UICloud {
+            games: Arc::new(RwLock::new(Vec::new())),
+            selected_idx: 0,
+            top_row: 0,
             pending: Arc::new(AtomicBool::new(false)),
-            active_panel: 0,
-            right_panel: 2,
-            panels: [
-                panel::Panel::new_local(12),
-                panel::Panel::new_local(SCREEN_WIDTH / 2 + 12),
-                panel::Panel::new_cloud(SCREEN_WIDTH / 2 + 12),
-            ],
-            no_data_tex: None,
-            qr_code_state: QrCodeState::new(),
-            menu: Menu::new(),
-            scroll_progress: ScrollProgress::new(40.0, 110.0),
+            cloud_manifest: Arc::new(RwLock::new(None)),
+            fetch_at: Arc::new(RwLock::new(0)),
+            show_settings: false,
+            settings: None,
         }
     }
 
-    pub fn init(&mut self) {
-        for panel in self.panels.iter_mut() {
-            panel.init();
+    fn fetch_sync_data(&self, titles: &crate::tai::Titles) {
+        if Arc::strong_count(&self.games) > 1 {
+            return; // already fetching
         }
-        if self.no_data_tex.is_none() {
-            self.no_data_tex = Some(vita2d_load_png_file("app0:sce_sys/resources/no-data.png"));
-        }
-        if self.qr_code_state.qr_code.is_some() {
-            if Api::get_read().is_login() {
-                self.qr_code_state.qr_code = None;
-            }
-            return;
-        }
-        // update qrcode Texture
-        if let Ok(mut qr_code) = self.qr_code_state.qr_code_buf.try_write() {
-            if let Some(buf) = &*qr_code {
-                self.qr_code_state.qr_code = Some(vita2d_load_png_buf(buf));
-                *qr_code = None;
-            }
-        }
-        if Arc::strong_count(&self.qr_code_state.qr_code_buf) > 1 {
-            return;
-        }
-        if !Api::get_read().is_login() {
-            self.start_auth();
-        }
-    }
 
-    fn is_pending(&self) -> bool {
-        self.pending.load(Ordering::Relaxed)
-    }
+        let config = Config::global();
+        let is_configured = config.is_configured();
 
-    fn start_auth(&mut self) {
-        let qr_code_buf = Arc::clone(&self.qr_code_state.qr_code_buf);
+        let title_list: Vec<(String, String)> = titles
+            .iter()
+            .map(|t| (t.title_id().to_string(), t.name().to_string()))
+            .collect();
+
+        let games = Arc::clone(&self.games);
+        let cloud_manifest = Arc::clone(&self.cloud_manifest);
+        let fetch_at = Arc::clone(&self.fetch_at);
+
         tokio::spawn(async move {
-            let api_type = Api::get_read().api_type;
-            let auth_url = Api::get_read().get_auth_url();
-            let device_code = match Api::start_auth(&auth_url, api_type) {
-                Ok(auth_res) => {
-                    let qrcode_url = Api::get_read()
-                        .get_qr_code_url(&auth_res.user_code.expect("auth user code"));
-                    let buf = qrcode_generator::to_png_to_vec(
-                        qrcode_url,
-                        qrcode_generator::QrCodeEcc::Low,
-                        SAVE_LIST_QR_CODE_SIZE as usize,
-                    )
-                    .unwrap();
-                    *qr_code_buf.write().unwrap() = Some(buf);
-                    auth_res.device_code
+            // Fetch cloud manifest if configured
+            let manifest = if is_configured {
+                match Api::get_cloud_manifest(&config) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        error!("fetch manifest failed: {}", e);
+                        None
+                    }
                 }
-                Err(err) => {
-                    error!("auth error: {:?}", err);
-                    Toast::show(format!("获取授权失败"));
-                    None
-                }
+            } else {
+                None
             };
 
-            while let Some(device_code) = &device_code {
-                let get_token_url = Api::get_read().get_token_url(device_code);
-                match Api::start_fetch_token(&get_token_url, api_type) {
-                    Ok(token_res) => {
-                        // 更新登录状态
-                        match Api::start_fetch_name_of_pancake(
-                            token_res.access_token.as_ref().unwrap(),
-                        ) {
-                            Ok(name_of_pancake) => {
-                                Api::update_auth_data(
-                                    api_type,
-                                    Some(AuthData::new(token_res, name_of_pancake)),
-                                );
-                                Toast::show("登录成功！".to_string());
-                            }
-                            Err(err) => {
-                                error!("fetch profile failed: {:?}", err);
-                                Toast::show("登录失败，获取用户信息失败！".to_string());
+            // Build per-game info
+            let mut info_list = Vec::new();
+            for (title_id, name) in &title_list {
+                let local_dir = format!("{}/{} {}", GAME_SAVE_LOCAL_DIR, title_id, name);
+                let local_dir = local_dir.trim().to_string();
+
+                let (has_local, local_time) = Self::scan_local_backup(&local_dir);
+                let cloud_data = manifest
+                    .as_ref()
+                    .and_then(|m| m.games.get(title_id));
+
+                let entry = GameSyncEntry {
+                    title: name.clone(),
+                    local_hash: None,
+                    local_timestamp: local_time.clone(),
+                    cloud_hash: cloud_data.map(|c| c.latest_hash.clone()),
+                    cloud_timestamp: cloud_data.map(|c| c.latest_version.clone()),
+                    last_synced_hash: None,
+                };
+                let status = compute_status(&entry);
+
+                info_list.push(SyncGameInfo {
+                    title_id: title_id.clone(),
+                    name: name.clone(),
+                    status,
+                    local_time,
+                    cloud_time: cloud_data.map(|c| c.latest_version.clone()),
+                    cloud_size: cloud_data.map(|c| c.size),
+                    has_local_backup: has_local,
+                });
+            }
+
+            info_list.sort_by(|a, b| {
+                // Sort: need action first, then in-sync, then no-data
+                let a_prio = status_priority(&a.status);
+                let b_prio = status_priority(&b.status);
+                b_prio.cmp(&a_prio).then(a.name.cmp(&b.name))
+            });
+
+            *games.write().unwrap() = info_list;
+            *cloud_manifest.write().unwrap() = manifest;
+            *fetch_at.write().unwrap() = crate::utils::current_time() as u64;
+        });
+    }
+
+    fn scan_local_backup(local_dir: &str) -> (bool, Option<String>) {
+        let path = Path::new(local_dir);
+        if !path.exists() {
+            return (false, None);
+        }
+        let mut latest: Option<String> = None;
+        if let Ok(entries) = path.read_dir() {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".zip") {
+                    if let Ok(meta) = entry.metadata() {
+                        if let Ok(mod_time) = meta.modified() {
+                            let ts = format!("{:?}", mod_time);
+                            if latest.as_ref().map(|l| &ts > l).unwrap_or(true) {
+                                latest = Some(ts);
                             }
                         }
-                        break;
-                    }
-                    Err(err) => {
-                        info!("fetch token failed: {:?}", err);
-                    }
-                }
-
-                // wait 6s
-                tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
-
-                // drop if strong count < 2
-                if Arc::strong_count(&qr_code_buf) < 2 {
-                    break;
-                }
-            }
-        });
-    }
-
-    pub fn get_action_params(
-        &mut self,
-        from_path: &str,
-        name: &str,
-        to_path: &str,
-    ) -> (
-        Arc<RwLock<Option<DirPending>>>,
-        Arc<RwLock<Option<DirPending>>>,
-        String,
-        String,
-        String,
-        String,
-        String,
-    ) {
-        let from_panel = self.get_from_panel();
-        let from_dir_pending_to_enter = Arc::clone(&from_panel.dir_pending_to_enter);
-        let to_panel = self.get_to_panel();
-        let to_dir_pending_to_enter = Arc::clone(&to_panel.dir_pending_to_enter);
-        let from_path = from_path.to_string();
-        let to_path = to_path.to_string();
-        let from = join_path(&from_path, &name);
-        let to = join_path(&to_path, &name);
-        let name = name.to_string();
-
-        (
-            from_dir_pending_to_enter,
-            to_dir_pending_to_enter,
-            from_path,
-            to_path,
-            from,
-            to,
-            name,
-        )
-    }
-
-    pub fn create_local_dir(&mut self, from_path: &str, to_path: &str) -> bool {
-        let input = normalize_path(&show_keyboard(""));
-        if input.is_empty() {
-            return false;
-        }
-        match fs::create_dir(Path::new(&join_path(from_path, &input))) {
-            Ok(_) => {
-                self.get_from_panel().refresh_current_dir();
-                if from_path == to_path {
-                    self.get_to_panel().refresh_current_dir();
-                }
-                Toast::show("创建文件夹完成！".to_string());
-            }
-            Err(err) => {
-                error!("create dir failed: {:?}", err);
-                Toast::show(format!("创建文件夹失败：{}", err));
-            }
-        }
-
-        true
-    }
-
-    pub fn create_cloud_dir(&mut self, from_path: &str, to_path: &str) -> bool {
-        let input = normalize_path(&show_keyboard(""));
-        if input.is_empty() {
-            Toast::show("创建文件夹取消！".to_string());
-            return false;
-        }
-        let (from_dir_pending_to_enter, _, from_path, _, _, _, name) =
-            self.get_action_params(&from_path, "", to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在创建文件夹".to_string());
-            Loading::notify_desc(input.clone());
-            match Api::start_create_dir(&from_path, &input) {
-                Ok(_) => {
-                    do_cloud_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    Toast::show("创建文件夹完成！".to_string());
-                }
-                Err(err) => {
-                    error!("create dir failed: {:?}", err);
-                    Toast::show(format!("创建文件夹失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn rename_local(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        let old_name = join_path(from_path, name);
-        let input = normalize_path(&show_keyboard(name));
-        if input.is_empty() {
-            Toast::show("重命名取消！".to_string());
-            return false;
-        }
-        let new_name = join_path(from_path, &input);
-        if old_name == new_name {
-            Toast::show("名字相同，重命名取消！".to_string());
-            return false;
-        }
-        match fs::rename(old_name, new_name) {
-            Ok(_) => {
-                self.get_from_panel().refresh_current_dir();
-                if from_path == to_path {
-                    self.get_to_panel().refresh_current_dir();
-                }
-                Toast::show("重命名完成！".to_string());
-            }
-            Err(err) => {
-                error!("rename failed: {:?}", err);
-                Toast::show(format!("重命名失败：{}", err));
-            }
-        }
-
-        true
-    }
-
-    pub fn rename_cloud(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        let input = normalize_path(&show_keyboard(name));
-        if input.is_empty() {
-            Toast::show("重命名取消！".to_string());
-            return false;
-        }
-        let (from_dir_pending_to_enter, _, from_path, _, from, _, name) =
-            self.get_action_params(&from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在重命名".to_string());
-            Loading::notify_desc(input.clone());
-            match Api::start_file_manager(
-                &utf8_percent_encode(&from, NON_ALPHANUMERIC).to_string(),
-                None,
-                Some(&utf8_percent_encode(&input, NON_ALPHANUMERIC).to_string()),
-                crate::api::ApiOperates::Rename,
-            ) {
-                Ok(_) => {
-                    do_cloud_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    Toast::show("重命名完成！".to_string());
-                }
-                Err(err) => {
-                    error!("rename failed: {:?}", err);
-                    Toast::show(format!("重命名失败"));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn delete_local(
-        &mut self,
-        is_dir: bool,
-        from_path: &str,
-        name: &str,
-        to_path: &str,
-    ) -> bool {
-        if !UIDialog::present(&format!("确定删除 {} ？", name)) {
-            return false;
-        }
-        let (from_dir_pending_to_enter, to_dir_pending_to_enter, from_path, to_path, _, _, name) =
-            self.get_action_params(from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            let abs_path = join_path(&from_path, &name);
-            match if is_dir {
-                fs::remove_dir_all(abs_path)
-            } else {
-                fs::remove_file(abs_path)
-            } {
-                Ok(_) => {
-                    do_local_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    if from_path == to_path {
-                        do_local_action(
-                            &to_path,
-                            &name,
-                            DirPendingAction::Refresh,
-                            to_dir_pending_to_enter,
-                        );
-                    }
-                    Toast::show("删除完成！".to_string());
-                }
-                Err(err) => {
-                    error!("remove failed: {:?}", err);
-                    Toast::show(format!("删除失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn delete_cloud(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        if !UIDialog::present(&format!("确定删除 {} ？", name)) {
-            return false;
-        }
-        let (from_dir_pending_to_enter, _, from_path, _, _, _, name) =
-            self.get_action_params(&from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在删除文件".to_string());
-            Loading::notify_desc(name.to_string());
-            match Api::start_file_manager(
-                &utf8_percent_encode(&join_path(&from_path, &name), NON_ALPHANUMERIC).to_string(),
-                None,
-                None,
-                crate::api::ApiOperates::Delete,
-            ) {
-                Ok(_) => {
-                    do_cloud_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    Toast::show("删除完成！".to_string());
-                }
-                Err(err) => {
-                    error!("delete failed: {:?}", err);
-                    Toast::show(format!("删除失败"));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn copy_local(&mut self, is_dir: bool, from_path: &str, name: &str, to_path: &str) -> bool {
-        if Path::new(&join_path(to_path, name)).exists() {
-            Toast::show("目标文件已存在！".to_string());
-            return false;
-        }
-        let (_, to_dir_pending_to_enter, _, to_path, from, to, name) =
-            self.get_action_params(from_path, name, to_path);
-        if to.starts_with(&from) {
-            Toast::show("目标文件夹不能是源文件夹的子文件夹！".to_string());
-            return false;
-        }
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            match if is_dir {
-                copy_dir_all(from, to)
-            } else {
-                fs::copy(from, to)
-            } {
-                Ok(_) => {
-                    do_local_action(
-                        &to_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        to_dir_pending_to_enter,
-                    );
-                    Toast::show("复制完成！".to_string());
-                }
-                Err(err) => {
-                    error!("copy failed: {:?}", err);
-                    Toast::show(format!("复制失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn move_local(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        if Path::new(&join_path(to_path, &name)).exists() {
-            Toast::show("目标文件已存在！".to_string());
-            return false;
-        }
-        let (
-            from_dir_pending_to_enter,
-            to_dir_pending_to_enter,
-            from_path,
-            to_path,
-            from,
-            to,
-            name,
-        ) = self.get_action_params(from_path, name, to_path);
-        if to.starts_with(&from) {
-            Toast::show("目标文件夹不能是源文件夹的子文件夹！".to_string());
-            return false;
-        }
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            match fs::rename(from, to) {
-                Ok(_) => {
-                    do_local_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    do_local_action(
-                        &to_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        to_dir_pending_to_enter,
-                    );
-                    Toast::show("移动完成！".to_string());
-                }
-                Err(err) => {
-                    error!("copy failed: {:?}", err);
-                    Toast::show(format!("移动失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn zip_local(&mut self, is_dir: bool, from_path: &str, name: &str, to_path: &str) -> bool {
-        let name_with_ext = format!("{}.zip", name);
-        let output_path = join_path(from_path, &name_with_ext);
-        let output_path = if !Path::new(&output_path).exists() {
-            output_path
-        } else {
-            let input = normalize_path(&show_keyboard(&name));
-            if input.is_empty() {
-                Toast::show("压缩取消！".to_string());
-                return false;
-            }
-            join_path(from_path, &format!("{}.zip", input))
-        };
-        if Path::new(&output_path).exists() {
-            Toast::show("目标文件已存在！".to_string());
-            return false;
-        }
-        let input_path = join_path(from_path, name);
-        let (from_dir_pending_to_enter, to_dir_pending_to_enter, from_path, to_path, _, _, name) =
-            self.get_action_params(from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在压缩".to_string());
-            match if is_dir {
-                zip_dir(&input_path, &output_path, &[])
-            } else {
-                zip_file(&from_path, &name, &output_path)
-            } {
-                Ok(_) => {
-                    do_local_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    if from_path == to_path {
-                        do_local_action(
-                            &to_path,
-                            &name,
-                            DirPendingAction::Refresh,
-                            to_dir_pending_to_enter,
-                        );
-                    }
-                    Toast::show("压缩完成！".to_string());
-                }
-                Err(err) => {
-                    error!("zip failed: {:?}", err);
-                    Toast::show(format!("压缩失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn unzip_local(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        // remove .zip ext name
-        let name_without_ext = name[0..name.len() - 4].to_string();
-        let output_dir = join_path(from_path, &name_without_ext);
-        let output_dir = if !Path::new(&output_dir).exists() {
-            output_dir
-        } else {
-            let input = normalize_path(&show_keyboard(&name_without_ext));
-            if input.is_empty() {
-                Toast::show("解压取消！".to_string());
-                return false;
-            }
-            join_path(from_path, &input)
-        };
-        if Path::new(&output_dir).exists() {
-            Toast::show("目标文件已存在！".to_string());
-            return false;
-        }
-        let (from_dir_pending_to_enter, to_dir_pending_to_enter, from_path, to_path, _, _, name) =
-            self.get_action_params(from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在解压".to_string());
-            Loading::notify_desc(name.clone());
-            match zip_extract(join_path(&from_path, &name), output_dir, None) {
-                Ok(_) => {
-                    do_local_action(
-                        &from_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        from_dir_pending_to_enter,
-                    );
-                    if from_path == to_path {
-                        do_local_action(
-                            &to_path,
-                            &name,
-                            DirPendingAction::Refresh,
-                            to_dir_pending_to_enter,
-                        );
-                    }
-                    Toast::show("解压完成！".to_string());
-                }
-                Err(err) => {
-                    error!("zip failed: {:?}", err);
-                    Toast::show(format!("解压失败：{}", err));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn upload_to_cloud(&mut self, from_path: &str, name: &str, to_path: &str) -> bool {
-        let (_, to_dir_pending_to_enter, _, to_path, from, _, name) =
-            self.get_action_params(&from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在上传".to_string());
-            Loading::notify_desc(name.to_string());
-            match Api::upload_to_cloud(&to_path, &name, &from, false) {
-                Ok(_) => {
-                    do_cloud_action(
-                        &to_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        to_dir_pending_to_enter,
-                    );
-                    Toast::show("上传完成！".to_string());
-                }
-                Err(err) => {
-                    error!("upload failed: {:?}", err);
-                    Toast::show(format!("上传失败"));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn download_from_cloud(
-        &mut self,
-        from_path: &str,
-        name: &str,
-        fs_id: u64,
-        to_path: &str,
-    ) -> bool {
-        if !UIDialog::present(&format!("确定下载 {} ？", name)) {
-            return false;
-        }
-        if to_path == "" {
-            Toast::show("请先选择下载位置！".to_string());
-            return false;
-        }
-        if Path::new(&join_path(to_path, name)).exists() {
-            Toast::show("目标文件已存在！".to_string());
-            return false;
-        }
-        let (_, to_dir_pending_to_enter, _, to_path, _, to, name) =
-            self.get_action_params(&from_path, name, to_path);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在下载".to_string());
-            Loading::notify_desc(name.to_string());
-            match Api::start_download(fs_id, &to) {
-                Ok(_) => {
-                    do_local_action(
-                        &to_path,
-                        &name,
-                        DirPendingAction::Refresh,
-                        to_dir_pending_to_enter,
-                    );
-                    Toast::show("下载完成！".to_string());
-                }
-                Err(err) => {
-                    error!("download failed: {:?}", err);
-                    Toast::show(format!("下载失败"));
-                }
-            }
-            pending.store(false, Ordering::Relaxed);
-            Loading::hide();
-        });
-
-        true
-    }
-
-    pub fn zip_local_and_upload(
-        &mut self,
-        is_dir: bool,
-        from_path: &str,
-        name: &str,
-        to_path: &str,
-    ) -> bool {
-        let name_with_ext = format!("{}.zip", name);
-        let tmp_name_with_ext = format!("{}.zip", get_current_format_time());
-        let input_path = join_path(from_path, name);
-        let (_, to_dir_pending_to_enter, from_path, to_path, output_path, _, _) =
-            self.get_action_params(from_path, &tmp_name_with_ext, to_path);
-        let name = name.to_string();
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            Loading::notify_title("正在压缩".to_string());
-            Loading::notify_desc(name.to_string());
-            let is_success = match if is_dir {
-                zip_dir(&input_path, &output_path, &[])
-            } else {
-                zip_file(&from_path, &name, &output_path)
-            } {
-                Ok(_) => true,
-                Err(err) => {
-                    error!("zip failed: {:?}", err);
-                    Toast::show(format!("压缩失败：{}", err));
-                    false
-                }
-            };
-            if is_success {
-                Loading::notify_title("正在上传".to_string());
-                match Api::upload_to_cloud(&to_path, &name_with_ext, &output_path, false) {
-                    Ok(_) => {
-                        do_cloud_action(
-                            &to_path,
-                            &name,
-                            DirPendingAction::Refresh,
-                            to_dir_pending_to_enter,
-                        );
-                        Toast::show("上传完成！".to_string());
-                    }
-                    Err(err) => {
-                        error!("upload failed: {:?}", err);
-                        Toast::show(format!("上传失败：{}", err));
                     }
                 }
             }
-            if Path::new(&output_path).exists() {
-                if let Err(err) = fs::remove_file(output_path) {
-                    error!("remove tmp zip file failed: {:?}", err);
+        }
+        let has = latest.is_some();
+        (has, latest)
+    }
+
+    fn sync_all(&self) {
+        let config = Config::global();
+        if !config.is_configured() {
+            Toast::show("Configure server in Settings first.".to_string());
+            return;
+        }
+
+        let games = self.games.read().unwrap().clone();
+        let upload_needed: Vec<_> = games
+            .iter()
+            .filter(|g| g.status == SyncStatus::UploadNeeded && g.has_local_backup)
+            .map(|g| (g.title_id.clone(), g.name.clone()))
+            .collect();
+        let download_available: Vec<_> = games
+            .iter()
+            .filter(|g| g.status == SyncStatus::DownloadAvailable)
+            .map(|g| (g.title_id.clone(), g.name.clone()))
+            .collect();
+        let conflicts: Vec<_> = games
+            .iter()
+            .filter(|g| g.status == SyncStatus::Conflict)
+            .map(|g| (g.title_id.clone(), g.name.clone()))
+            .collect();
+
+        if !conflicts.is_empty() {
+            let names: Vec<String> = conflicts.iter().map(|(_, n)| n.clone()).collect();
+            Toast::show(format!("Conflicts: {}. Resolve per-game first.", names.join(", ")));
+            return;
+        }
+
+        if upload_needed.is_empty() && download_available.is_empty() {
+            Toast::show("Everything is in sync!".to_string());
+            return;
+        }
+
+        if !UIDialog::present(&format!(
+            "Sync: {} upload(s), {} download(s)?",
+            upload_needed.len(),
+            download_available.len()
+        )) {
+            return;
+        }
+
+        let pending = Arc::clone(&self.pending);
+        pending.store(true, Ordering::Relaxed);
+        Loading::show();
+        let cloud_manifest = Arc::clone(&self.cloud_manifest);
+        let games_arc = Arc::clone(&self.games);
+
+        tokio::spawn(async move {
+            let config = Config::global();
+            let mut ok = 0;
+            let mut fail = 0;
+
+            // Upload phase
+            for (i, (title_id, name)) in upload_needed.iter().enumerate() {
+                Loading::notify_title(format!(
+                    "Uploading ({}/{}) {}",
+                    i + 1,
+                    upload_needed.len(),
+                    name
+                ));
+                let local_dir = format!("{}/{} {}", GAME_SAVE_LOCAL_DIR, title_id, name);
+                let local_dir = local_dir.trim().to_string();
+                // Find the newest local backup zip
+                if let Some(zip_path) = Self::find_newest_zip(&local_dir) {
+                    let hash = match sha256_file(&zip_path) {
+                        Ok(h) => h,
+                        Err(_) => {
+                            fail += 1;
+                            continue;
+                        }
+                    };
+                    let ts = crate::ime::get_current_format_time();
+                    match Api::upload_save(&config, title_id, &zip_path, &hash, &ts) {
+                        Ok(_) => ok += 1,
+                        Err(e) => {
+                            error!("upload {} failed: {}", title_id, e);
+                            fail += 1;
+                        }
+                    }
                 }
             }
-            pending.store(false, Ordering::Relaxed);
+
+            // Download phase
+            for (i, (title_id, name)) in download_available.iter().enumerate() {
+                Loading::notify_title(format!(
+                    "Downloading ({}/{}) {}",
+                    i + 1,
+                    download_available.len(),
+                    name
+                ));
+                let local_dir = format!("{}/{} {}", GAME_SAVE_LOCAL_DIR, title_id, name);
+                let local_dir = local_dir.trim().to_string();
+                let dl_path = format!(
+                    "{}/{}.zip",
+                    local_dir,
+                    crate::ime::get_current_format_time()
+                );
+                match Api::download_save(&config, title_id, &dl_path) {
+                    Ok(_) => ok += 1,
+                    Err(e) => {
+                        error!("download {} failed: {}", title_id, e);
+                        fail += 1;
+                    }
+                }
+            }
+
+            // Re-fetch manifest to update status
+            match Api::get_cloud_manifest(&config) {
+                Ok(m) => *cloud_manifest.write().unwrap() = Some(m),
+                Err(e) => error!("re-fetch manifest failed: {}", e),
+            }
+
+            Toast::show(format!("Sync done: {} ok, {} failed", ok, fail));
             Loading::hide();
+            pending.store(false, Ordering::Relaxed);
+
+            // Trigger re-scan
+            if let Ok(mut games) = games_arc.write() {
+                // Mark for refresh
+                games.clear();
+            }
         });
-
-        true
     }
 
-    pub fn get_from_panel(&mut self) -> &mut Panel {
-        self.panels.get_mut(self.active_panel).unwrap()
+    fn find_newest_zip(dir: &str) -> Option<String> {
+        let path = Path::new(dir);
+        if !path.exists() {
+            return None;
+        }
+        let mut newest: Option<(String, std::time::SystemTime)> = None;
+        if let Ok(entries) = path.read_dir() {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.ends_with(".zip") {
+                    if let Ok(meta) = entry.metadata() {
+                        if let Ok(mtime) = meta.modified() {
+                            if newest
+                                .as_ref()
+                                .map(|(_, t)| mtime > *t)
+                                .unwrap_or(true)
+                            {
+                                newest = Some((entry.path().to_string_lossy().to_string(), mtime));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        newest.map(|(p, _)| p)
     }
 
-    pub fn get_to_panel(&mut self) -> &mut Panel {
-        self.panels
-            .get_mut(if self.active_panel == 0 {
-                self.right_panel
-            } else {
-                0
-            })
-            .unwrap()
+    fn status_color(status: &SyncStatus) -> u32 {
+        match status {
+            SyncStatus::InSync => rgba(0x44, 0xcc, 0x44, 0xff),
+            SyncStatus::UploadNeeded | SyncStatus::LocalOnly => rgba(0x44, 0x88, 0xff, 0xff),
+            SyncStatus::DownloadAvailable | SyncStatus::CloudOnly => rgba(0xff, 0xaa, 0x44, 0xff),
+            SyncStatus::Conflict => rgba(0xff, 0x44, 0x44, 0xff),
+        }
     }
 
-    pub fn draw_current_dir_info(&self) {
-        let left_panel = self.panels.get(0).unwrap();
-        let right_panel = self.panels.get(self.right_panel).unwrap();
-        let left_text = format!("本地：{}", &left_panel.current_dir_path());
-        let right_text = format!(
-            "{}：{}",
-            if self.right_panel == 1 {
-                "本地（右）"
-            } else {
-                "网盘"
-            },
-            &right_panel.current_dir_path()
-        );
-        let left = 330;
-        // selected
-        if let Some(dir) = if self.active_panel == 0 {
-            left_panel.current_dir()
-        } else {
-            right_panel.current_dir()
-        } {
-            let current_position = format!("→ {}/{}", dir.state.selected_idx + 1, dir.items.len());
-            vita2d_draw_text(
-                left,
-                60 + vita2d_text_height(1.0, &current_position),
-                rgba(0xff, 0xff, 0xff, 0xff),
-                1.0,
-                &current_position,
-            );
+    fn status_label(status: &SyncStatus) -> &'static str {
+        match status {
+            SyncStatus::InSync => "In Sync",
+            SyncStatus::UploadNeeded => "Upload",
+            SyncStatus::DownloadAvailable => "Download",
+            SyncStatus::Conflict => "Conflict",
+            SyncStatus::LocalOnly => "Local Only",
+            SyncStatus::CloudOnly => "Cloud Only",
         }
-        // left panel
-        let mut text_width = vita2d_text_width(1.0, &left_text);
-        let mut x = left;
-        if text_width > SCREEN_WIDTH - 340 {
-            vita2d_set_clip(x, 10, SCREEN_WIDTH - 10, 35);
-            x = x
-                - ((text_width - (SCREEN_WIDTH - 340)) as f32
-                    * self.scroll_progress.progress() as f32) as i32;
+    }
+
+    fn scroll_list(&mut self, buttons: u32) {
+        if is_button(buttons, SceCtrlButtons::SceCtrlUp) {
+            self.selected_idx = (self.selected_idx - 1).max(0);
+        } else if is_button(buttons, SceCtrlButtons::SceCtrlDown) {
+            let size = self.games.read().unwrap().len() as i32;
+            if size > 0 {
+                self.selected_idx = (self.selected_idx + 1).min(size - 1);
+            }
         }
-        vita2d_draw_text(
-            x,
-            10 + vita2d_text_height(1.0, &left_text),
-            rgba(0xff, 0xff, 0xff, 0xff),
-            1.0,
-            &left_text,
-        );
-        if text_width > SCREEN_WIDTH - 340 {
-            vita2d_unset_clip();
-        }
-        // right panel
-        text_width = vita2d_text_width(1.0, &right_text);
-        x = left;
-        if text_width > SCREEN_WIDTH - 340 {
-            vita2d_set_clip(x, 35, SCREEN_WIDTH - 10, 60);
-            x = x
-                - ((text_width - (SCREEN_WIDTH - 340)) as f32
-                    * self.scroll_progress.progress() as f32) as i32;
-        }
-        vita2d_draw_text(
-            x,
-            35 + vita2d_text_height(1.0, &right_text),
-            rgba(0xff, 0xff, 0xff, 0xff),
-            1.0,
-            &right_text,
-        );
-        if text_width > SCREEN_WIDTH - 340 {
-            vita2d_unset_clip();
+        if self.selected_idx < self.top_row {
+            self.top_row = self.selected_idx;
+        } else if self.selected_idx - self.top_row >= DISPLAY_ROWS {
+            self.top_row = self.selected_idx - DISPLAY_ROWS + 1;
         }
     }
 }
 
+fn status_priority(status: &SyncStatus) -> i32 {
+    match status {
+        SyncStatus::Conflict => 4,
+        SyncStatus::UploadNeeded => 3,
+        SyncStatus::LocalOnly => 2,
+        SyncStatus::DownloadAvailable => 1,
+        SyncStatus::CloudOnly => 1,
+        SyncStatus::InSync => 0,
+    }
+}
+
 impl UIBase for UICloud {
-    fn is_forces(&self) -> bool {
-        self.panels.iter().any(|p| p.is_pending()) || self.is_pending() || self.menu.is_forces()
-    }
-
     fn update(&mut self, app_data: &mut AppData, buttons: u32) {
-        self.scroll_progress.update(buttons);
-
-        self.init();
-
-        if self.is_pending() {
-            return;
-        }
-
-        // active menu
-        if self.menu.is_forces() {
-            if is_button(buttons, SceCtrlButtons::SceCtrlCircle) {
-                let from_panel = self.panels.get(self.active_panel).unwrap();
-                let to_panel = self
-                    .panels
-                    .get(if self.active_panel == 0 {
-                        self.right_panel
-                    } else {
-                        0
-                    })
-                    .unwrap();
-                let from_path = from_panel.current_dir_path();
-                let to_path = to_panel.current_dir_path();
-                let is_from_local = !from_path.starts_with("/");
-                let item = from_panel.current_item();
-                if item.is_none() {
-                    match self.menu.get_selected_action().unwrap() {
-                        menu::MenuAction::NewDir => {
-                            if is_from_local {
-                                self.create_local_dir(&from_path, &to_path);
-                            } else {
-                                if Api::is_eat_pancake_valid() {
-                                    self.create_cloud_dir(&from_path, &to_path);
-                                } else {
-                                    UIDialog::present_qrcode(HOME_PAGE_URL);
-                                }
-                            }
-                            self.menu.close();
-                        }
-                        _ => {}
+        // Handle settings mode
+        if self.show_settings {
+            if let Some(ref mut settings) = self.settings {
+                if is_button(buttons, SceCtrlButtons::SceCtrlCross) {
+                    if settings.dirty {
+                        let config = settings.get_config().clone();
+                        config.save();
+                        Config::update_global(config);
+                        Toast::show("Settings saved.".to_string());
                     }
-                } else {
-                    let item = item.unwrap();
-                    let is_close_menu = match self.menu.get_selected_action().unwrap() {
-                        menu::MenuAction::NewDir => {
-                            if is_from_local {
-                                self.create_local_dir(&from_path, &to_path)
-                            } else {
-                                if Api::is_eat_pancake_valid() {
-                                    self.create_cloud_dir(&from_path, &to_path)
-                                } else {
-                                    UIDialog::present_qrcode(HOME_PAGE_URL);
-                                    false
-                                }
-                            }
-                        }
-                        menu::MenuAction::Rename => {
-                            if is_from_local {
-                                self.rename_local(&from_path, &item.name.to_string(), &to_path)
-                            } else {
-                                if Api::is_eat_pancake_valid() {
-                                    self.rename_cloud(&from_path, &item.name.to_string(), &to_path)
-                                } else {
-                                    UIDialog::present_qrcode(HOME_PAGE_URL);
-                                    false
-                                }
-                            }
-                        }
-                        menu::MenuAction::Delete => {
-                            if is_from_local {
-                                self.delete_local(
-                                    item.is_dir,
-                                    &from_path,
-                                    &item.name.to_string(),
-                                    &to_path,
-                                )
-                            } else {
-                                if Api::is_eat_pancake_valid() {
-                                    self.delete_cloud(&from_path, &item.name.to_string(), &to_path)
-                                } else {
-                                    UIDialog::present_qrcode(HOME_PAGE_URL);
-                                    false
-                                }
-                            }
-                        }
-                        menu::MenuAction::Copy => self.copy_local(
-                            item.is_dir,
-                            &from_path,
-                            &item.name.to_string(),
-                            &to_path,
-                        ),
-                        menu::MenuAction::Move => {
-                            self.move_local(&from_path, &item.name.to_string(), &to_path)
-                        }
-                        menu::MenuAction::Unzip => {
-                            self.unzip_local(&from_path, &item.name.to_string(), &to_path)
-                        }
-                        menu::MenuAction::Zip => self.zip_local(
-                            item.is_dir,
-                            &from_path,
-                            &item.name.to_string(),
-                            &to_path,
-                        ),
-                        menu::MenuAction::Upload => {
-                            if Api::is_eat_pancake_valid() {
-                                self.upload_to_cloud(&from_path, &item.name.to_string(), &to_path)
-                            } else {
-                                UIDialog::present_qrcode(HOME_PAGE_URL);
-                                false
-                            }
-                        }
-                        menu::MenuAction::ZipUpload => {
-                            if Api::is_eat_pancake_valid() {
-                                self.zip_local_and_upload(
-                                    item.is_dir,
-                                    &from_path,
-                                    &item.name.to_string(),
-                                    &to_path,
-                                )
-                            } else {
-                                UIDialog::present_qrcode(HOME_PAGE_URL);
-                                false
-                            }
-                        }
-                        menu::MenuAction::Download => {
-                            if Api::is_eat_pancake_valid() {
-                                self.download_from_cloud(
-                                    &from_path,
-                                    &item.name.to_string(),
-                                    item.fs_id.unwrap(),
-                                    &to_path,
-                                )
-                            } else {
-                                UIDialog::present_qrcode(HOME_PAGE_URL);
-                                false
-                            }
-                        }
-                        menu::MenuAction::ChangeAccountId => {
-                            if let Some(path) = Path::new(&from_path).parent() {
-                                mount_pfs(path.to_str().unwrap());
-                                if let Ok(()) = update_sfo_file_with_current_account_id(&join_path(
-                                    &from_path, &item.name,
-                                )) {
-                                    Toast::show("修改为当前账号完成！".to_string());
-                                } else {
-                                    Toast::show("修改为当前账号失败！".to_string());
-                                }
-                                unmount_pfs();
-                            }
-                            false
-                        }
-                    };
-                    if is_close_menu {
-                        self.menu.close();
-                    }
+                    self.show_settings = false;
+                    self.settings = None;
+                    // Trigger refresh
+                    self.games.write().unwrap().clear();
+                    return;
                 }
-            } else {
-                self.menu.update(buttons);
+                settings.update(app_data, buttons);
             }
             return;
         }
 
-        // active panel
-        let active_panel = self.panels.get_mut(self.active_panel).unwrap();
-        active_panel.update(app_data, buttons);
-
-        if active_panel.is_forces() {
+        // Normal sync view
+        if self.pending.load(Ordering::Relaxed) {
+            if !Loading::is_pending() {
+                self.pending.store(false, Ordering::Relaxed);
+            }
             return;
-        } else if is_button(buttons, SceCtrlButtons::SceCtrlLeft) {
-            self.active_panel = 0
-        } else if is_button(buttons, SceCtrlButtons::SceCtrlRight) {
-            self.active_panel = self.right_panel
-        } else if is_button(buttons, SceCtrlButtons::SceCtrlSquare) {
-            self.right_panel = if self.right_panel == 2 { 1 } else { 2 };
-            if self.active_panel != 0 {
-                self.active_panel = self.right_panel;
-            }
+        }
+
+        // Lazy fetch
+        if self.games.read().unwrap().is_empty() {
+            self.fetch_sync_data(&app_data.titles);
+            return;
+        }
+
+        self.scroll_list(buttons);
+
+        if is_button(buttons, SceCtrlButtons::SceCtrlCross) {
+            self.sync_all();
         } else if is_button(buttons, SceCtrlButtons::SceCtrlTriangle) {
-            let panel = self.panels.get(self.active_panel).unwrap();
-            let path = panel.current_dir_path();
-            if path != "" {
-                let panel_to = self
-                    .panels
-                    .get(if self.active_panel == 0 {
-                        self.right_panel
-                    } else {
-                        0
-                    })
-                    .unwrap();
-                self.menu
-                    .open(panel.current_item(), &path, &panel_to.current_dir_path());
-            } else {
-                Toast::show("请选择文件夹或文件！".to_string());
-            }
+            self.show_settings = true;
+            self.settings = Some(UISettings::new(&Config::global()));
         }
     }
 
-    fn draw(&self, _app_data: &AppData) {
+    fn draw(&self, app_data: &AppData) {
+        // Settings overlay
+        if self.show_settings {
+            if let Some(ref settings) = self.settings {
+                settings.draw(app_data);
+            }
+            return;
+        }
+
+        let games = self.games.read().unwrap();
+        if games.is_empty() && !self.pending.load(Ordering::Relaxed) {
+            let msg = if Config::global().is_configured() {
+                "Loading sync data..."
+            } else {
+                "Server not configured. Press (Triangle) for Settings."
+            };
+            vita2d_draw_text(
+                (SCREEN_WIDTH - vita2d_text_width(1.0, msg)) / 2,
+                SCREEN_HEIGHT / 2,
+                rgba(0xaa, 0xaa, 0xaa, 0xff),
+                1.0,
+                msg,
+            );
+        } else {
+            let size = games.len() as i32;
+            for idx in 0..DISPLAY_ROWS {
+                let i = self.top_row + idx;
+                if i >= size {
+                    break;
+                }
+                let game = &games[i as usize];
+                let x = 12;
+                let y = 45 + 32 * idx;
+
+                // Selection highlight
+                if i == self.selected_idx {
+                    vita2d_draw_rect(
+                        x as f32,
+                        (y - 2) as f32,
+                        (SCREEN_WIDTH - 24) as f32,
+                        30.0,
+                        get_active_color(),
+                    );
+                    vita2d_draw_rect(
+                        (x + 2) as f32,
+                        y as f32,
+                        (SCREEN_WIDTH - 28) as f32,
+                        26.0,
+                        rgba(0x18, 0x18, 0x18, 0xff),
+                    );
+                }
+
+                // Game name
+                let name = format!("{}  {}", game.name, game.title_id);
+                let max_name_w = SCREEN_WIDTH - 200;
+                let name_w = vita2d_text_width(1.0, &name);
+                let display_name = if name_w > max_name_w {
+                    format!("{}...", &name[..(name.len().min((max_name_w / 8) as usize))])
+                } else {
+                    name
+                };
+                vita2d_draw_text(x + 8, y + 20, rgba(0xff, 0xff, 0xff, 0xff), 1.0, &display_name);
+
+                // Status badge
+                let label = Self::status_label(&game.status);
+                let color = Self::status_color(&game.status);
+                let badge_x = SCREEN_WIDTH - 120;
+                let badge_w = vita2d_text_width(1.0, label) + 12;
+                vita2d_draw_rect(badge_x as f32, (y) as f32, badge_w as f32, 24.0, color);
+                vita2d_draw_text(
+                    badge_x + 6,
+                    y + 18,
+                    rgba(0xff, 0xff, 0xff, 0xff),
+                    1.0,
+                    label,
+                );
+            }
+        }
+
+        // header
+        let header = "Save Sync";
+        vita2d_draw_text(
+            (SCREEN_WIDTH - vita2d_text_width(1.0, header)) / 2,
+            22,
+            rgba(0xff, 0xff, 0xff, 0xff),
+            1.0,
+            header,
+        );
+        vita2d_line(0.0, 32.0, SCREEN_WIDTH as f32, 32.0, rgba(0x66, 0x66, 0x66, 0xff));
+
+        // Bottom bar
+        let bar = "(X) Sync All    (△) Settings    (↕) Select";
         vita2d_line(
-            (SCREEN_WIDTH / 2) as f32,
-            90.0,
-            (SCREEN_WIDTH / 2) as f32,
+            0.0,
+            (SCREEN_HEIGHT - 58) as f32,
+            SCREEN_WIDTH as f32,
             (SCREEN_HEIGHT - 58) as f32,
             rgba(0x99, 0x99, 0x99, 0xff),
         );
+        vita2d_draw_text(
+            SCREEN_WIDTH - 12 - vita2d_text_width(1.0, bar),
+            SCREEN_HEIGHT - 58 / 2 + vita2d_text_height(1.0, bar) / 2,
+            rgba(0xff, 0xff, 0xff, 0xff),
+            1.0,
+            bar,
+        );
+    }
 
-        self.draw_current_dir_info();
-
-        for (idx, panel) in self.panels.iter().enumerate() {
-            if idx > 0 && idx != self.right_panel {
-                continue;
-            }
-
-            panel.draw(idx == self.active_panel, &self.no_data_tex);
-
-            if idx == 2 && self.qr_code_state.qr_code.is_some() {
-                let left = SCREEN_WIDTH / 2;
-                let x = (left + (SCREEN_WIDTH / 2 - SAVE_LIST_QR_CODE_SIZE) / 2) as f32;
-                let y = 130.0;
-                vita2d_draw_texture(self.qr_code_state.qr_code.as_ref().unwrap(), x, y);
-                vita2d_draw_text(
-                    left + (SCREEN_WIDTH / 2 - vita2d_text_width(1.0, SCAN_QR_CODE_TIPS)) / 2,
-                    SCREEN_HEIGHT - 80,
-                    rgba(0xff, 0xff, 0xff, 0xff),
-                    1.0,
-                    SCAN_QR_CODE_TIPS,
-                )
-            }
-        }
-
-        self.menu.draw();
+    fn is_forces(&self) -> bool {
+        self.show_settings || self.pending.load(Ordering::Relaxed)
     }
 }

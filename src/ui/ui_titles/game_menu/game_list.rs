@@ -12,30 +12,26 @@ use std::{
 use log::error;
 
 use crate::{
-    api::Api,
-    constant::{
-        GAME_CARD_SAVE_DIR, GAME_SAVE_CLOUD_DIR, GAME_SAVE_DIR, HOME_PAGE_URL, SCREEN_WIDTH,
-    },
+    constant::{GAME_CARD_SAVE_DIR, GAME_SAVE_DIR, SCREEN_WIDTH},
     ime::get_current_format_time,
     tai::{mount_pfs, psv_launch_app_by_title_id, unmount_pfs, Title, Titles},
     ui::{
         ui_cloud::list_state::ListState, ui_dialog::UIDialog, ui_loading::Loading, ui_toast::Toast,
     },
     utils::{
-        backup_game_save, delete_dir_if_empty, get_active_color, get_game_local_backup_dir,
-        normalize_path, update_sfo_file_with_current_account_id,
+        backup_game_save, get_active_color, get_game_local_backup_dir,
+        update_sfo_file_with_current_account_id,
     },
     vita2d::{is_button, rgba, vita2d_draw_rect, vita2d_draw_text, SceCtrlButtons},
 };
 
 enum GameMenuAction {
+    LaunchApp,
     BackupAllGameSave,
-    BackupAllGameSaveToCloud,
-    ChangeAccountId,
+    UpdateAccountId,
     DeleteGameSave,
     DeleteSelectedGameSave,
     DeleteAllGameSaves,
-    LaunchApp,
 }
 
 impl Deref for GameMenuAction {
@@ -43,13 +39,12 @@ impl Deref for GameMenuAction {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            GameMenuAction::BackupAllGameSave => "备份所有游戏存档",
-            GameMenuAction::BackupAllGameSaveToCloud => "备份所有游戏存档到云端",
-            GameMenuAction::ChangeAccountId => "修改存档账号为当前账号",
-            GameMenuAction::DeleteGameSave => "删除该游戏存档",
-            GameMenuAction::DeleteSelectedGameSave => "删除该游戏本地存档备份",
-            GameMenuAction::DeleteAllGameSaves => "删除所有游戏本地存档备份",
-            GameMenuAction::LaunchApp => "启动游戏",
+            GameMenuAction::LaunchApp => "Launch Game",
+            GameMenuAction::BackupAllGameSave => "Backup All Game Saves",
+            GameMenuAction::UpdateAccountId => "Update Account ID",
+            GameMenuAction::DeleteGameSave => "Delete Game Save",
+            GameMenuAction::DeleteSelectedGameSave => "Delete Local Backup",
+            GameMenuAction::DeleteAllGameSaves => "Delete All Local Backups",
         }
     }
 }
@@ -63,7 +58,7 @@ impl Display for GameMenuAction {
 pub struct GameList {
     pending: Arc<AtomicBool>,
     list_state: ListState,
-    list: [GameMenuAction; 7],
+    list: [GameMenuAction; 6],
     game_save_dir_prepare_to_mount: Arc<RwLock<Option<String>>>,
     game_save_dir_on_mounted: Arc<RwLock<Option<String>>>,
 }
@@ -76,8 +71,7 @@ impl GameList {
             list: [
                 GameMenuAction::LaunchApp,
                 GameMenuAction::BackupAllGameSave,
-                GameMenuAction::BackupAllGameSaveToCloud,
-                GameMenuAction::ChangeAccountId,
+                GameMenuAction::UpdateAccountId,
                 GameMenuAction::DeleteGameSave,
                 GameMenuAction::DeleteSelectedGameSave,
                 GameMenuAction::DeleteAllGameSaves,
@@ -106,12 +100,12 @@ impl GameList {
             if let Some(game_save_dir) = dirs.iter().find(|dir| Path::new(&dir).exists()) {
                 if let Err(err) = fs::remove_dir_all(&game_save_dir) {
                     error!("remove {} failed: {}", game_save_dir, err);
-                    Toast::show(format!("删除 {} 存档失败！", name));
+                    Toast::show(format!("Failed to delete {} save!", name));
                 } else {
-                    Toast::show(format!("删除 {} 存档完成！", name));
+                    Toast::show(format!("Deleted {} save!", name));
                 }
             } else {
-                Toast::show(format!("{} 存档不存在！", name));
+                Toast::show(format!("{} save not found!", name));
             }
             Loading::hide();
             pending.store(false, Ordering::Relaxed);
@@ -129,12 +123,12 @@ impl GameList {
             if Path::new(&local_dir).exists() {
                 if let Err(err) = fs::remove_dir_all(&local_dir) {
                     error!("remove {} failed: {}", local_dir, err);
-                    Toast::show(format!("删除 {} 本地备份失败！", name));
+                    Toast::show(format!("Failed to delete {} local backup!", name));
                 } else {
-                    Toast::show(format!("删除 {} 游戏本地备份完成！", name));
+                    Toast::show(format!("Deleted {} local backup!", name));
                 }
             } else {
-                Toast::show(format!("{} 本地备份不存在！", name));
+                Toast::show(format!("{} local backup not found!", name));
             }
             Loading::hide();
             pending.store(false, Ordering::Relaxed);
@@ -157,18 +151,15 @@ impl GameList {
                 if Path::new(&local_dir).exists() {
                     if let Err(err) = fs::remove_dir_all(&local_dir) {
                         error!("remove {} failed: {}", local_dir, err);
-                        Toast::show(format!("删除 {} 本地备份失败！", name));
+                        Toast::show(format!("Failed to delete {} backup!", name));
                         delete_failed_count += 1;
                     }
                 }
             }
             if delete_failed_count == 0 {
-                Toast::show("删除所有游戏备份完成！".to_string());
+                Toast::show("All backups deleted!".to_string());
             } else {
-                Toast::show(format!(
-                    "删除部分游戏备份完成，{} 个删除失败",
-                    delete_failed_count
-                ));
+                Toast::show(format!("{} deletions failed!", delete_failed_count));
             }
             Loading::hide();
             pending.store(false, Ordering::Relaxed);
@@ -196,7 +187,7 @@ impl GameList {
             let mut backup_failed_count = 0;
             for (idx, (title_id, real_id, name)) in list.iter().enumerate() {
                 Loading::notify_title(format!(
-                    "正在备份 ({}/{})： {}！",
+                    "Backing up ({}/{}): {}",
                     idx + 1,
                     list.len(),
                     name
@@ -241,135 +232,15 @@ impl GameList {
                             "zip {} to {} failed: {:?}",
                             game_save_dir, backup_to_path, err
                         );
-                        Toast::show(format!("游戏 {} 备份失败！", name));
+                        Toast::show(format!("Backup failed for {}!", name));
                     }
                     _ => {}
                 }
             }
             if backup_failed_count == 0 {
-                Toast::show("所有游戏备份完成！".to_string());
+                Toast::show("All backups complete!".to_string());
             } else {
-                Toast::show(format!(
-                    "部分游戏备份完成，{} 个备份失败",
-                    backup_failed_count
-                ));
-            }
-            Loading::hide();
-            pending.store(false, Ordering::Relaxed);
-        });
-    }
-
-    pub fn backup_all_game_save_to_cloud(&self, titles: &Titles) {
-        let list = titles
-            .iter()
-            .map(|title| {
-                (
-                    title.title_id().to_string(),
-                    title.real_id().to_string(),
-                    title.name().to_string(),
-                )
-            })
-            .collect::<Vec<(String, String, String)>>();
-
-        let game_save_dir_on_mounted = Arc::clone(&self.game_save_dir_on_mounted);
-        let game_save_dir_prepare_to_mount = Arc::clone(&self.game_save_dir_prepare_to_mount);
-        let pending = Arc::clone(&self.pending);
-        pending.store(true, Ordering::Relaxed);
-        Loading::show();
-        tokio::spawn(async move {
-            let mut backup_failed_count = 0;
-            for (idx, (title_id, real_id, name)) in list.iter().enumerate() {
-                Loading::notify_title(format!(
-                    "正在备份 ({}/{})： {}！",
-                    idx + 1,
-                    list.len(),
-                    name
-                ));
-                let dirs = [
-                    format!("{}/{}", GAME_CARD_SAVE_DIR, real_id),
-                    format!("{}/{}", GAME_SAVE_DIR, real_id),
-                ];
-                let game_save_dir = dirs.iter().find(|dir| Path::new(&dir).exists());
-                if game_save_dir.is_none() {
-                    continue;
-                }
-                let game_save_dir = game_save_dir.unwrap();
-                let mut is_prepare = false;
-                loop {
-                    if let Ok(game_save_dir_on_mounted) = game_save_dir_on_mounted.try_read() {
-                        if let Some(game_save_dir_on_mounted) = game_save_dir_on_mounted.as_ref() {
-                            if game_save_dir_on_mounted == game_save_dir {
-                                break;
-                            }
-                        }
-                    }
-                    if !is_prepare {
-                        if let Ok(mut game_save_dir_prepare_to_mount) =
-                            game_save_dir_prepare_to_mount.try_write()
-                        {
-                            is_prepare = true;
-                            *game_save_dir_prepare_to_mount = Some(game_save_dir.clone());
-                        }
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                let backup_name = format!("{}.zip", get_current_format_time());
-                let local_dir = get_game_local_backup_dir(&title_id, &name);
-                let backup_to_path = format!("{}/{}", local_dir, backup_name);
-                let success = match backup_game_save(game_save_dir, &backup_to_path) {
-                    Err(err) => {
-                        backup_failed_count += 1;
-                        error!(
-                            "zip {} to {} failed: {:?}",
-                            game_save_dir, backup_to_path, err
-                        );
-                        Toast::show(format!("游戏 {} 备份失败！", name));
-                        false
-                    }
-                    _ => true,
-                };
-
-                if success {
-                    let (cloud_dir, _) = Api::fetch_save_cloud_list(&title_id, true);
-                    let cloud_dir = if cloud_dir.is_some() {
-                        cloud_dir.unwrap()
-                    } else {
-                        format!(
-                            "{}/{} {}",
-                            GAME_SAVE_CLOUD_DIR,
-                            title_id,
-                            normalize_path(name.trim())
-                        )
-                        .trim()
-                        .to_string()
-                    };
-                    match Api::upload_to_cloud(&cloud_dir, &backup_name, &backup_to_path, false) {
-                        Err(err) => {
-                            error!("upload {} to cloud failed: {:?}", backup_to_path, err);
-                            Toast::show(format!("游戏 {} 备份上传失败！", title_id));
-                        }
-                        _ => {}
-                    }
-                }
-
-                // remove local backup after upload
-                if Path::new(&backup_to_path).exists() {
-                    if let Err(err) = fs::remove_file(&backup_to_path) {
-                        error!(
-                            "remove {} failed after backup upload: {}",
-                            backup_to_path, err
-                        );
-                    }
-                    let _ = delete_dir_if_empty(&local_dir);
-                }
-            }
-            if backup_failed_count == 0 {
-                Toast::show("所有游戏备份完成！".to_string());
-            } else {
-                Toast::show(format!(
-                    "部分游戏备份完成，{} 个备份失败！",
-                    backup_failed_count
-                ));
+                Toast::show(format!("{} backups failed!", backup_failed_count));
             }
             Loading::hide();
             pending.store(false, Ordering::Relaxed);
@@ -388,7 +259,6 @@ impl GameList {
             _ => None,
         };
 
-        // mount
         if let Some(prepare_dir) = prepare_dir {
             mount_pfs(&prepare_dir);
             *self.game_save_dir_on_mounted.write().unwrap() = Some(prepare_dir);
@@ -419,21 +289,8 @@ impl GameList {
                         self.backup_all_game_save(titles);
                     }
                 }
-                GameMenuAction::BackupAllGameSaveToCloud => {
-                    if Api::get_read().is_login() {
-                        if Api::is_eat_pancake_valid() {
-                            if UIDialog::present(&GameMenuAction::BackupAllGameSaveToCloud) {
-                                self.backup_all_game_save_to_cloud(titles);
-                            }
-                        } else {
-                            UIDialog::present_qrcode(HOME_PAGE_URL);
-                        }
-                    } else {
-                        Toast::show("请先登录！".to_string());
-                    }
-                }
-                GameMenuAction::ChangeAccountId => {
-                    if UIDialog::present(&GameMenuAction::ChangeAccountId) {
+                GameMenuAction::UpdateAccountId => {
+                    if UIDialog::present(&GameMenuAction::UpdateAccountId) {
                         [
                             format!("{}/{}", GAME_CARD_SAVE_DIR, title.real_id()),
                             format!("{}/{}", GAME_SAVE_DIR, title.real_id()),
@@ -443,10 +300,11 @@ impl GameList {
                             let sfo_path = format!("{}/sce_sys/param.sfo", path);
                             if Path::new(&sfo_path).exists() {
                                 mount_pfs(path);
-                                if let Ok(()) = update_sfo_file_with_current_account_id(&sfo_path) {
-                                    Toast::show("修改存档为当前账号完成！".to_string());
+                                if let Ok(()) = update_sfo_file_with_current_account_id(&sfo_path)
+                                {
+                                    Toast::show("Account ID updated!".to_string());
                                 } else {
-                                    Toast::show("修改存档为当前账号失败！".to_string());
+                                    Toast::show("Account ID update failed!".to_string());
                                 }
                                 unmount_pfs();
                                 return true;
@@ -461,7 +319,7 @@ impl GameList {
                         if UIDialog::present(&if count == 0 {
                             format!("{}", GameMenuAction::DeleteGameSave)
                         } else {
-                            format!("{}：{}", GameMenuAction::DeleteGameSave, count)
+                            format!("{}: {}", GameMenuAction::DeleteGameSave, count)
                         }) {
                             if count == 0 {
                                 self.delete_game_save(title);
@@ -480,7 +338,7 @@ impl GameList {
                         if UIDialog::present(&if count == 0 {
                             format!("{}", GameMenuAction::DeleteSelectedGameSave)
                         } else {
-                            format!("{}：{}", GameMenuAction::DeleteSelectedGameSave, count)
+                            format!("{}: {}", GameMenuAction::DeleteSelectedGameSave, count)
                         }) {
                             if count == 0 {
                                 self.delete_selected_game_save(title);
@@ -499,7 +357,7 @@ impl GameList {
                         if UIDialog::present(&if count == 0 {
                             format!("{}", GameMenuAction::DeleteAllGameSaves)
                         } else {
-                            format!("{}：{}", GameMenuAction::DeleteAllGameSaves, count)
+                            format!("{}: {}", GameMenuAction::DeleteAllGameSaves, count)
                         }) {
                             if count == 0 {
                                 self.delete_all_game_saves(titles);

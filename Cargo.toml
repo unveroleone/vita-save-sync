@@ -2,32 +2,28 @@
 name = "vita-save-cloud"
 version = "0.1.0"
 edition = "2021"
+# Renamed product: Save Sync — see [package.metadata.vita] below
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [patch.crates-io]
-# Required for rustls
 ring = { git = "https://github.com/vita-rust/ring", branch = "v0.16.20-vita" }
 
 [dependencies]
-save_cloud_api = { version = "1.0", path = "../save-cloud-api" }
+sha2 = "0.10.8"
 rustls = "=0.21.7"
 sct = "=0.7.0"
 ring = "=0.16.20"
 rustls-webpki = "=0.101.6"
 
 serde = { version = "1.0", features = ["derive"] }
-serde_urlencoded = "0.7.1"
 serde_json = "1.0.108"
-percent-encoding = "2.3.1"
-mime = "0.3.17"
-mime_guess = "2.0.4"
-ureq_multipart = "1.1.1"
-ureq = { version = "2.9.1", default-features = false, features = ["tls", "json"] }
+ureq = { version = "=2.9.1", default-features = false, features = ["tls", "json"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time"] }
 log = { version = "0.4.20", features = ["std"]}
-zip = { version = "0.6.6", default-features = false, features = ["deflate", "deflate-miniz", "deflate-zlib", "time"] }
-qrcode-generator = "4.1.9"
+zip = { version = "0.6.6", default-features = false, features = ["deflate", "deflate-zlib", "deflate-miniz", "time"] }
+miniz_oxide = "=0.7.1"
+flate2 = "=1.0.28"
 base64 = "0.21.5"
 md5 = "0.7.0"
 
@@ -41,9 +37,9 @@ opt-level = 3
 
 [package.metadata.vita]
 # A unique identifier for your project. 9 chars, alphanumeric.
-title_id = "SAVECLOUD"
+title_id = "SAVSYNC01"
 # A title that will be shown on a bubble. Optional, will take the crate name as the default
-title_name = "Save Cloud"
+title_name = "Save Sync"
 # Optional. A path to static files relative to the project.
 assets = "assets"
 # Optional, this is the default

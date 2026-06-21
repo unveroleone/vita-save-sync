@@ -183,7 +183,7 @@ pub fn zip_extract(
 ) -> Result<(), Box<dyn Error>> {
     let mut zip = zip::ZipArchive::new(fs::File::open(from)?)?;
     for i in 0..zip.len() {
-        Loading::notify_title(format!("正在解压 {}/{}", i + 1, zip.len()));
+        Loading::notify_title(format!("Extracting {}/{}", i + 1, zip.len()));
         let mut file_name = zip.by_index(i)?;
         let output_path = match file_name.enclosed_name() {
             Some(file_name) => {
@@ -266,11 +266,11 @@ pub fn restore_game_save(from: &str, to: &str) -> Result<(), Box<dyn Error>> {
             .join(&format!("{} auto.zip", get_current_format_time()))
             .to_str()
         {
-            Loading::notify_title("正在自动备份".to_string());
+            Loading::notify_title("Auto-backing up...".to_string());
             let _ = backup_game_save(to, auto_backup_path);
         }
     }
-    Loading::notify_title("正在恢复存档".to_string());
+    Loading::notify_title("Restoring save...".to_string());
     let mut res = zip_extract(from, to, Some(&BACKUP_BLACK_LIST));
     if res.is_ok() {
         let sfo_path = format!("{}/sce_sys/param.sfo", to);
@@ -289,6 +289,18 @@ pub fn base64_decode(data: &str) -> Result<Vec<u8>, Box<dyn Error>> {
 
 pub fn get_str_md5(data: &[u8]) -> String {
     format!("{:x}", md5::compute(data))
+}
+
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(data);
+    let hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+    format!("sha256:{}", hex)
+}
+
+pub fn sha256_file(path: &str) -> Result<String, Box<dyn Error>> {
+    let data = fs::read(path)?;
+    Ok(sha256_hex(&data))
 }
 
 pub fn delete_dir_if_empty(path: &str) -> Result<(), Box<dyn Error>> {
@@ -371,11 +383,11 @@ mod tests {
 
     #[test]
     pub fn test_base64() -> Result<(), Box<dyn std::error::Error>> {
-        let data = String::from("你好");
+        let data = String::from("hello world");
         let data = data.as_bytes();
         let key = base64_encode(data);
         let res = String::from_utf8_lossy(&base64_decode(&key)?).to_string();
-        assert_eq!(res, "你好");
+        assert_eq!(res, "hello world");
 
         Ok(())
     }
@@ -423,10 +435,10 @@ mod tests {
 
     #[test]
     fn test_normalize_path() {
-        let path = "你好\\你好/你好:你好*你好?你好\"你好\'你好<你好>你好|你好";
+        let path = "a\\a/a:a*a?a\"a\'a<a>a|a";
         let path = super::normalize_path(path);
         assert_eq!(
-            "你好_你好_你好_你好_你好_你好_你好_你好_你好_你好_你好",
+            "a_a_a_a_a_a_a_a_a_a_a",
             path
         );
     }

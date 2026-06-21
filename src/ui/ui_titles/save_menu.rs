@@ -1,6 +1,10 @@
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
 use crate::{
+    config::Config,
     constant::{
         GAME_CARD_SAVE_DIR, GAME_SAVE_DIR, NEW_BACKUP, NEW_CLOUD_BACKUP,
         SAVE_DRAWER_BOTTOM_BAR_TEXT, SAVE_DRAWER_CLOUD_BOTTOM_BAR_TEXT, SCREEN_WIDTH, TAB_CLOUD,
@@ -50,8 +54,9 @@ impl SaveMenu {
             }
         }
         // init save list
-        self.local = Some(Box::new(SaveListLocal::new(NEW_BACKUP, title)));
-        self.cloud = Some(Box::new(SaveListCloud::new(NEW_CLOUD_BACKUP, title)));
+        let config = Arc::new(RwLock::new(Config::global()));
+        self.local = Some(Box::new(SaveListLocal::new(NEW_BACKUP, title, Arc::clone(&config))));
+        self.cloud = Some(Box::new(SaveListCloud::new(NEW_CLOUD_BACKUP, title, config)));
         // init selected list
         self.init_save_list();
     }

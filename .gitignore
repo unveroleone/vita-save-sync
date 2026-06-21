@@ -1,3 +1,12 @@
 /target
 /c/.cache
 .DS_Store
+
+# Server
+server/node_modules/
+server/dist/
+server/data/
+server/.env
+
+# Local cargo config (machine-specific paths)
+.cargo/

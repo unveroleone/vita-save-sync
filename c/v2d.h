@@ -5,7 +5,7 @@
 #include <vita2d.h>
 
 #define UNUSED(x) __attribute__((unused)) x
-#define PGF_FONT_PATH "ux0:app/SAVECLOUD/sce_sys/resources/font.pgf"
+#define PGF_FONT_PATH "ux0:app/SAVSYNC01/sce_sys/resources/font.pgf"
 #define VITA_DISPLAY_WIDTH 960
 #define VITA_DISPLAY_HEIGHT 544
 

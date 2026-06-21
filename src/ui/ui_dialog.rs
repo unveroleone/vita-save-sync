@@ -2,36 +2,26 @@ use std::time::Instant;
 
 use crate::{
     constant::{
-        ABOUT_TEXT, ANIME_TIME_160, DIALOG_BOTTOM_TOP, DIALOG_CANCEL_TEXT, DIALOG_CONFIRM_TEXT,
-        DIALOG_HEIGHT, DIALOG_WIDTH, INVALID_EAT_PANCAKE, SCREEN_HEIGHT, SCREEN_WIDTH,
+        ANIME_TIME_160, DIALOG_BOTTOM_TOP, DIALOG_CANCEL_TEXT, DIALOG_CONFIRM_TEXT, DIALOG_HEIGHT,
+        DIALOG_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH,
     },
     utils::ease_out_expo,
     vita2d::{
         is_button, rgba, vita2d_ctrl_peek_positive, vita2d_draw_rect, vita2d_draw_text,
-        vita2d_draw_texture, vita2d_drawing, vita2d_get_screenshot, vita2d_line,
-        vita2d_load_png_buf, vita2d_present, vita2d_text_height, vita2d_text_width, SceCtrlButtons,
+        vita2d_draw_texture, vita2d_drawing, vita2d_get_screenshot, vita2d_line, vita2d_present,
+        vita2d_text_height, vita2d_text_width, SceCtrlButtons,
     },
 };
 
 pub struct UIDialog;
 
 impl UIDialog {
-    fn draw(text: &str, is_qrcode: bool, is_about: bool) -> bool {
-        // qrcode
-        let qr_code = if is_qrcode {
-            let buf = qrcode_generator::to_png_to_vec(text, qrcode_generator::QrCodeEcc::Low, 150)
-                .unwrap();
-            Some(vita2d_load_png_buf(&buf))
-        } else {
-            None
-        };
-        // get screenshot
+    fn draw(text: &str) -> bool {
         let screenshot = vita2d_get_screenshot();
         let mut open = true;
         let mut toggle_at = Instant::now();
         let mut result: Option<bool> = None;
         'dialog_loop: loop {
-            // state
             if open && Instant::now() - toggle_at > ANIME_TIME_160 {
                 let buttons = vita2d_ctrl_peek_positive();
                 result = match buttons {
@@ -72,11 +62,8 @@ impl UIDialog {
             );
 
             let left = ((SCREEN_WIDTH - DIALOG_WIDTH) / 2) as f32;
-            // draw
             vita2d_drawing();
-            // screen background
             vita2d_draw_texture(&screenshot, 0.0, 0.0);
-            // dialog bg
             vita2d_draw_rect(
                 left,
                 top,
@@ -84,7 +71,6 @@ impl UIDialog {
                 DIALOG_HEIGHT as f32,
                 rgba(0x44, 0x44, 0x44, 0xff),
             );
-            // line
             vita2d_line(
                 left,
                 top + DIALOG_BOTTOM_TOP as f32,
@@ -99,10 +85,12 @@ impl UIDialog {
                 top + DIALOG_HEIGHT as f32,
                 rgba(0x18, 0x18, 0x18, 0xff),
             );
-            // buttons
             vita2d_draw_text(
-                left as i32 + (DIALOG_WIDTH / 2 - vita2d_text_width(1.0, DIALOG_CANCEL_TEXT)) / 2,
-                top as i32 + DIALOG_BOTTOM_TOP + 38
+                left as i32
+                    + (DIALOG_WIDTH / 2 - vita2d_text_width(1.0, DIALOG_CANCEL_TEXT)) / 2,
+                top as i32
+                    + DIALOG_BOTTOM_TOP
+                    + 38
                     - (40 - vita2d_text_height(1.0, DIALOG_CANCEL_TEXT)) / 2,
                 rgba(0xff, 0xff, 0xff, 0xff),
                 1.0,
@@ -111,40 +99,21 @@ impl UIDialog {
             vita2d_draw_text(
                 SCREEN_WIDTH / 2
                     + (DIALOG_WIDTH / 2 - vita2d_text_width(1.0, DIALOG_CONFIRM_TEXT)) / 2,
-                top as i32 + DIALOG_BOTTOM_TOP + 38
+                top as i32
+                    + DIALOG_BOTTOM_TOP
+                    + 38
                     - (40 - vita2d_text_height(1.0, DIALOG_CONFIRM_TEXT)) / 2,
                 rgba(0xff, 0xff, 0xff, 0xff),
                 1.0,
                 DIALOG_CONFIRM_TEXT,
             );
-            if let Some(qr_code) = &qr_code {
-                let text = if is_about {
-                    ABOUT_TEXT
-                } else {
-                    INVALID_EAT_PANCAKE
-                };
-                vita2d_draw_text(
-                    left as i32 + (DIALOG_WIDTH - vita2d_text_width(1.0, text)) / 2,
-                    top as i32 + 30,
-                    rgba(0xff, 0xff, 0xff, 0xff),
-                    1.0,
-                    text,
-                );
-                vita2d_draw_texture(
-                    qr_code,
-                    left + ((DIALOG_WIDTH - 150) / 2) as f32,
-                    top + 50.0,
-                );
-            } else {
-                // text
-                vita2d_draw_text(
-                    left as i32 + (DIALOG_WIDTH - vita2d_text_width(1.0, text)) / 2,
-                    top as i32 + DIALOG_HEIGHT / 3,
-                    rgba(0xff, 0xff, 0xff, 0xff),
-                    1.0,
-                    text,
-                );
-            }
+            vita2d_draw_text(
+                left as i32 + (DIALOG_WIDTH - vita2d_text_width(1.0, text)) / 2,
+                top as i32 + DIALOG_HEIGHT / 3,
+                rgba(0xff, 0xff, 0xff, 0xff),
+                1.0,
+                text,
+            );
             vita2d_present();
         }
 
@@ -152,14 +121,10 @@ impl UIDialog {
     }
 
     pub fn present(text: &str) -> bool {
-        UIDialog::draw(text, false, false)
-    }
-
-    pub fn present_qrcode(text: &str) -> bool {
-        UIDialog::draw(text, true, false)
+        UIDialog::draw(text)
     }
 
     pub fn present_about(text: &str) -> bool {
-        UIDialog::draw(text, true, true)
+        UIDialog::draw(text)
     }
 }

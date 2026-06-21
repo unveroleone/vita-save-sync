@@ -5,9 +5,9 @@ use crate::utils::{create_parent_if_not_exists, str_to_c_str};
 
 const APP_KERNEL_PATH: &str = "app0:sce_sys/resources/kernel.skprx";
 const PLUGIN_KERNEL_PATHS: [&str; 3] = [
-    "ux0:data/SAVECLOUD/sce_sys/resources/kernel.skprx",
+    "ux0:data/SAVSYNC01/sce_sys/resources/kernel.skprx",
     "ux0:VitaShell/module/kernel.skprx",
-    "ux0:data/save-cloud/kernel.skprx",
+    "ux0:data/save-sync/kernel.skprx",
 ];
 
 extern "C" {

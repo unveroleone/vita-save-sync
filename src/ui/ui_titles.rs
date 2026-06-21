@@ -9,7 +9,7 @@ use log::error;
 
 use crate::{
     app::AppData,
-    constant::{GAME_CARD_SAVE_DIR, GAME_SAVE_DIR, HOME_PAGE_URL},
+    constant::{ABOUT_TEXT, GAME_CARD_SAVE_DIR, GAME_SAVE_DIR},
     utils::get_active_color,
     vita2d::{
         is_button, rgba, vita2d_draw_rect, vita2d_draw_text, vita2d_draw_texture_scale,
@@ -208,7 +208,7 @@ impl UITitles {
             if Path::new(&save_path).exists() {
                 &save_path
             } else {
-                "没有游戏存档"
+                "No saves found"
             },
         );
         // num
@@ -311,7 +311,7 @@ impl UIBase for UITitles {
                 }
             }
             if is_button(buttons, SceCtrlButtons::SceCtrlSquare) {
-                UIDialog::present_about(HOME_PAGE_URL);
+                UIDialog::present_about(ABOUT_TEXT);
             }
             // update selected title icon
             UITitles::update_selected(self, app_data, buttons);

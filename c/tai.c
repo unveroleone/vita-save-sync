@@ -17,8 +17,14 @@
 #define UNUSED(x) __attribute__((unused)) x
 #define MAX_MOUNT_POINT_LENGTH 16
 #define PSV_APP_DB "ur0:/shell/db/app.db"
-#define PLUGIN_KERNEL_PATH "ux0:app/SAVECLOUD/sce_sys/resources/kernel.skprx"
-#define PLUGIN_USER_PATH "ux0:app/SAVECLOUD/sce_sys/resources/user.suprx"
+#define PLUGIN_KERNEL_PATH "ux0:app/SAVSYNC01/sce_sys/resources/kernel.skprx"
+#define PLUGIN_USER_PATH "ux0:app/SAVSYNC01/sce_sys/resources/user.suprx"
+
+static void sqlite3_rw_init(void) {}
+static void sqlite3_rw_exit(void) {}
+
+__attribute__((weak)) void prevent_to_sleep(void) {}
+__attribute__((weak)) void launch_app_by_title_id(const char *title_id) {}
 #define SFO_MAGIC 0x46535000 // \x00PSF
 
 struct sfo_header {
@@ -77,7 +83,7 @@ int taiLoad() {
 
 int sceLoad() {
   int rc = sceKernelLoadStartModule(PLUGIN_USER_PATH, 0, NULL, 0, NULL, NULL);
-  // Allow writing to ux0:app/SAVECLOUD
+  // Allow writing to ux0:app/SAVSYNC01
   sceAppMgrUmount("app0:");
   sceAppMgrUmount("savedata0:");
   return rc;
@@ -112,7 +118,7 @@ int pfs_mount(const char *path) {
 
   memset(klicensee, 0, sizeof(klicensee));
 
-  args.process_titleid = "SAVECLOUD";
+  args.process_titleid = "SAVSYNC01";
   args.path = path;
   args.desired_mount_point = NULL;
   args.klicensee = klicensee;

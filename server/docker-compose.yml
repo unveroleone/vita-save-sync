@@ -1,0 +1,17 @@
+services:
+  vita-save-sync:
+    build: .
+    container_name: vita-save-sync
+    restart: unless-stopped
+    ports:
+      - "3099:3000"
+    environment:
+      - USER_TOKEN=${USER_TOKEN:?set a strong token}
+      - USER_NAME=${USER_NAME:-leo}
+      - DATA_DIR=/data
+    volumes:
+      - vita-save-data:/data
+
+volumes:
+  vita-save-data:
+    driver: local

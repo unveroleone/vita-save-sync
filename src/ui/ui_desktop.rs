@@ -25,7 +25,7 @@ const IMAGE_DEVICE_BG_PATH: &str = "app0:sce_sys/resources/device_bg.jpg";
 const ICON_SIZE: i32 = 70;
 const ICON_OFFSET: i32 = 10;
 const ICON_GAP: i32 = 20;
-const TEXT_VERSION: &str = "V2024.02.28";
+const TEXT_VERSION: &str = "V0.1.0";
 
 pub struct UIDesktop {
     selected_idx: i32,

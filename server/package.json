@@ -1,0 +1,20 @@
+{
+  "name": "vita-save-sync-server",
+  "version": "0.1.0",
+  "description": "Self-hosted sync server for Save Sync PS Vita app",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "fastify": "^4.26.2",
+    "@fastify/multipart": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.4.3",
+    "ts-node": "^10.9.2"
+  }
+}

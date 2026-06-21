@@ -1,8 +1,10 @@
 pub mod api;
 pub mod app;
+pub mod config;
 pub mod constant;
 pub mod ime;
 pub mod log;
+pub mod sync;
 pub mod tai;
 pub mod ui;
 pub mod utils;
