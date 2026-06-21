@@ -19,8 +19,7 @@ use crate::{
     ui::{ui_dialog::UIDialog, ui_loading::Loading, ui_settings::UISettings, ui_toast::Toast},
     utils::{get_active_color, sha256_file},
     vita2d::{
-        is_button, rgba, vita2d_draw_rect, vita2d_draw_text, vita2d_line, vita2d_text_height,
-        vita2d_text_width, SceCtrlButtons,
+        is_button, rgba, vita2d_draw_rect, vita2d_draw_text, vita2d_text_width, SceCtrlButtons,
     },
 };
 
@@ -48,7 +47,7 @@ pub struct UICloud {
     settings: Option<UISettings>,
 }
 
-const DISPLAY_ROWS: i32 = 14;
+const DISPLAY_ROWS: i32 = 12;
 
 impl UICloud {
     pub fn new() -> UICloud {
@@ -442,7 +441,7 @@ impl UIBase for UICloud {
                 }
                 let game = &games[i as usize];
                 let x = 12;
-                let y = 45 + 32 * idx;
+                let y = 100 + 32 * idx;
 
                 // Selection highlight
                 if i == self.selected_idx {
@@ -489,33 +488,6 @@ impl UIBase for UICloud {
             }
         }
 
-        // header
-        let header = "Save Sync";
-        vita2d_draw_text(
-            (SCREEN_WIDTH - vita2d_text_width(1.0, header)) / 2,
-            22,
-            rgba(0xff, 0xff, 0xff, 0xff),
-            1.0,
-            header,
-        );
-        vita2d_line(0.0, 32.0, SCREEN_WIDTH as f32, 32.0, rgba(0x66, 0x66, 0x66, 0xff));
-
-        // Bottom bar
-        let bar = "(X) Sync All  (△) Settings";
-        vita2d_line(
-            0.0,
-            (SCREEN_HEIGHT - 58) as f32,
-            SCREEN_WIDTH as f32,
-            (SCREEN_HEIGHT - 58) as f32,
-            rgba(0x99, 0x99, 0x99, 0xff),
-        );
-        vita2d_draw_text(
-            SCREEN_WIDTH - 12 - vita2d_text_width(1.0, bar),
-            SCREEN_HEIGHT - 58 / 2 + vita2d_text_height(1.0, bar) / 2,
-            rgba(0xff, 0xff, 0xff, 0xff),
-            1.0,
-            bar,
-        );
     }
 
     fn is_forces(&self) -> bool {

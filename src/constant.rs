@@ -39,7 +39,7 @@ pub const TEXT_R: &str = "-> R";
 pub const DESKTOP_BOTTOM_BAR_TEXT: &str =
     "(START) Exit    (□) About    (△) Menu    (X) Saves";
 pub const DESKTOP_BOTTOM_BAR_CLOUD_TEXT: &str =
-    "(START) Exit";
+    "(START) Exit  (X) Sync All  (△) Settings";
 
 // save drawer (local tab)
 pub const SAVE_DRAWER_BOTTOM_BAR_TEXT: &str =

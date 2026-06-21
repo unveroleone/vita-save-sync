@@ -2,7 +2,7 @@
 #include "vitashell_user.h"
 
 #include <psp2/appmgr.h>
-#include <psp2/iofcnt.h>
+#include <psp2/io/dirent.h>
 #include <psp2/kernel/modulemgr.h>
 #include <psp2/registrymgr.h>
 #include <psp2/sqlite.h>
