@@ -147,11 +147,17 @@ impl UITitles {
                     let icon_bufs = Arc::clone(&self.icon_bufs);
                     tokio::spawn(async move {
                         if Path::new(&iconpath).exists() {
-                            let file = fs::read(iconpath).expect("open icon file");
-                            icon_bufs
-                                .write()
-                                .expect("get write lock of icon bufs in spawn")
-                                .insert(idx as u32, Some(file));
+                            match fs::read(&iconpath) {
+                                Ok(file) => {
+                                    icon_bufs
+                                        .write()
+                                        .expect("get write lock of icon bufs in spawn")
+                                        .insert(idx as u32, Some(file));
+                                }
+                                Err(e) => {
+                                    error!("app iconpath read failed {}: {}", iconpath, e);
+                                }
+                            }
                         } else {
                             error!("app iconpath not exists: {}", iconpath);
                         }
