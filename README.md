@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/platform-PS%20Vita-111111?style=flat-square" alt="PS Vita">
   <img src="https://img.shields.io/badge/server-Node.js%20%7C%20Fastify-111111?style=flat-square" alt="Node.js">
   <img src="https://img.shields.io/badge/client-Rust%20%2B%20vita2d-111111?style=flat-square" alt="Rust">
-  <img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-111111?style=flat-square" alt="GPL-3.0">
 </p>
 
 <p align="center">
