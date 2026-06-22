@@ -1,0 +1,4 @@
+- [Project Overview](project-overview.md) — Save Sync PS Vita homebrew, stack, and architecture
+- [Build Process](build-process.md) — Local and CI VPK build instructions, prerequisites, common failures
+- [SQLite VFS](sqlite-vfs.md) — How the custom VitaShell SQLite VFS enables reading ur0:/shell/db/app.db
+- [Version Bumping](version-bumping.md) — Release checklist: Cargo.toml, git tag, CI workflow
