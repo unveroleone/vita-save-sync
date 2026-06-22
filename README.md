@@ -5,7 +5,7 @@
 <h1 align="center">Save Sync</h1>
 
 <p align="center">
-  <em>Manual cloud save sync for two modded PS Vitas. Self-hosted, no BS.</em>
+  <em>Manual cloud save sync for modded PS Vitas and PSTVs, self-hosted</em>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 ## What it does
 
 - Backs up PS Vita save data to a zip locally, then uploads to your own server
-- Downloads saves from the server to a second Vita
+- Downloads saves from the server to another device
 - Restores downloaded saves (creates a safety backup first)
 - Shows per-game sync status on the Cloud tab
 - TLS via iTLS-Enso + rustls on Vita
@@ -112,9 +112,9 @@ USER_TOKEN=your-secret DATA_DIR=/data node dist/index.js
 
 The app zips the save, uploads it, and removes the temp file. One step.
 
-### Restoring on a second Vita
+### Restoring on another device
 
-1. Set up the second Vita with the same server URL and token (use a different device name)
+1. Set up the other device with the same server URL and token (use a different device name)
 2. Games tab → select the game → **X** to open the drawer
 3. Press **R** for the Server Backup tab
 4. Select **Download & Restore** and press **X**
