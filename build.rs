@@ -40,6 +40,14 @@ fn main() {
     println!("cargo:rustc-link-lib=static=SceLibKernel_stub");
     println!("cargo:rustc-link-lib=static=VitaShellUser_stub_weak");
 
+    // VitaShell custom SQLite VFS — registers "psp2_rw" to allow opening ur0:/shell/db/app.db
+    cc::Build::new()
+        .file("./c/vita_sqlite_vfs.c")
+        .include("./c")
+        .static_flag(true)
+        .warnings(false)
+        .compile("vita_sqlite_vfs");
+
     cc::Build::new()
         .file("./c/tai.c")
         .static_flag(true)

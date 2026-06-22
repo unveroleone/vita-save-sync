@@ -21,6 +21,9 @@
 #define PLUGIN_KERNEL_PATH "ux0:app/SAVSYNC01/sce_sys/resources/kernel.skprx"
 #define PLUGIN_USER_PATH "ux0:app/SAVSYNC01/sce_sys/resources/user.suprx"
 
+extern int sqlite_init(void);
+extern int sqlite_exit(void);
+
 __attribute__((weak)) void prevent_to_sleep(void) {}
 __attribute__((weak)) void launch_app_by_title_id(const char *title_id) {}
 #define SFO_MAGIC 0x46535000 // \x00PSF
@@ -237,7 +240,7 @@ static void *_applist_init(UNUSED(void *data)) {
   list->size = 0;
   list->list = NULL;
   sceSysmoduleLoadModule(SCE_SYSMODULE_SQLITE);
-  sqlite3_initialize();
+  sqlite_init();
   char *query = "select a.titleid, b.realid, c.title,"
                 "       e.iconpath"
                 "  from (select titleid"
@@ -271,7 +274,7 @@ static void *_applist_init(UNUSED(void *data)) {
     }
     sqlite3_close(db);
   }
-  sqlite3_shutdown();
+  sqlite_exit();
 
   // ponytail: fallback — scan save dirs, only include real PS Vita game saves (PCS prefix)
   if (list->size == 0) {
