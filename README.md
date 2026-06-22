@@ -39,7 +39,7 @@ Requires HENkaku + iTLS-Enso on the Vita and a server you control (VPS, home ser
 ```bash
 cd server
 cp .env.example .env
-# Edit .env: set USER_TOKEN to a long random string, USER_NAME to your username
+# Edit .env: set USER_TOKEN to a long random string
 docker compose up -d
 ```
 
@@ -90,59 +90,53 @@ VPK output: `target/armv7-sony-vita-newlibeabihf/release/vita-save-cloud.vpk`
 4. Press **Triangle** to open Settings
 5. Fill in **Server URL** (e.g. `https://vita-sync.example.com`), **API Token**, and **Device Name**
 6. Select **Test Connection** — it checks both reachability and your token
-7. Press **O** to go back, or select **Save && Back**
+7. Press **o** to go back, or select **Save && Back**
 
 ---
 
 ## Workflow
 
-### Backing up and uploading a save
+### Uploading a save to the server
 
 1. Press **L** to go to the Games tab
-2. Select a game with **Up/Down**
-3. Press **O** to open the save drawer
-4. In the **Local Backup** column, press **X** to back up locally
-   — This zips the raw save files to `ux0:data/save-sync/backups/<TITLEID>/`
-5. In the **Server Backup** column, press **Select** to upload to the server
-   — The server stores the zip and records the hash and timestamp in the manifest
+2. Select a game
+3. Press **X** to open the save drawer
+4. Press **R** to switch to the **Server Backup** tab
+5. Select **Upload to Server** and press **X**
 
-That's one complete backup. The server now has this save.
+The app zips the save, uploads it, and removes the temp file. One step.
 
 ### Restoring on a second Vita
 
-1. Set up the second Vita with the same server URL and token (different device name)
-2. Go to the Games tab, select the game, press **O** to open the drawer
-3. In the **Server Backup** column, press **Square** to download
-   — The zip lands in `ux0:data/save-sync/backups/<TITLEID>/`
-4. In the **Local Backup** column, press **Square** to restore
-   — Save Sync backs up the current save first, then replaces it with the downloaded one
+1. Set up the second Vita with the same server URL and token (use a different device name)
+2. Games tab → select the game → **X** to open the drawer
+3. Press **R** for the Server Backup tab
+4. Select **Download & Restore** and press **X**
 
-### Other actions in the save drawer
+The app downloads from the server and restores directly. It creates a safety backup of the current save first.
 
-| Button | Local Backup column | Server Backup column |
-|--------|---------------------|----------------------|
-| X | Back up now | — |
-| Select | Upload to server | Download from server |
-| Square | Restore | Download & restore |
-| Triangle | Delete local backup | — |
-| O | Close drawer | — |
+To download without restoring yet, select **Download from server** instead.
+
+### Local backups (optional)
+
+The **Local Backup** tab (press **L** in the drawer) manages save slots on the Vita itself, independent of the server. Use it to keep manual snapshots or restore a previous local slot.
 
 ### Cloud tab
 
-Press **R** to switch to the Cloud tab. It shows every game with a sync status badge:
+Press **R** (main screen) to switch to the Cloud tab. It shows every game with a sync status badge:
 
 | Badge | Meaning |
 |-------|---------|
-| Synced | Local and cloud match |
-| Not Uploaded | Local backup exists, nothing on server yet |
-| Upload | Local is newer than server |
+| Synced | In sync with server |
+| Not Uploaded | Never uploaded to server |
+| Upload | Local is newer |
 | Download | Server has a newer version |
-| Cloud Only | On server, no local backup on this Vita |
-| Conflict | Both sides changed since last sync |
+| Cloud Only | On server, not on this Vita |
+| Conflict | Both sides changed |
 
-Press **X** to run **Sync All** — it uploads everything marked Upload and downloads everything marked Download. It stops and reports any Conflicts without touching them.
+Press **X** to run **Sync All** — it uploads everything marked Upload and downloads everything marked Download. Conflicts are reported but not touched.
 
-Press **Triangle** to open Settings from the Cloud tab.
+Press **Triangle** to open Settings.
 
 ---
 
