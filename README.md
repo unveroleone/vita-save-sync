@@ -165,34 +165,6 @@ Upload sends `X-Save-Hash` (SHA-256), `X-Save-Timestamp`, and `X-Device-Id` head
 
 ---
 
-## Build the Vita app (devs only)
-
-Download the VPK from [GitHub Releases](https://github.com/unveroleone/vita-save-sync/releases) unless you want to build from source.
-
-Requires macOS or Linux with VitaSDK installed.
-
-```bash
-# One-time setup
-brew install cmake
-git clone https://github.com/vitasdk/vdpm && cd vdpm
-./bootstrap-vitasdk.sh && ./install-all.sh
-# Add to ~/.zshrc:
-#   export VITASDK=/usr/local/vitasdk
-#   export PATH=$VITASDK/bin:$PATH
-
-rustup install nightly-2025-06-01
-rustup component add rust-src --toolchain nightly-2025-06-01
-cargo +nightly install cargo-vita
-
-# Build
-rustup override set nightly-2025-06-01
-cargo vita build vpk --release
-```
-
-VPK output: `target/armv7-sony-vita-newlibeabihf/release/vita-save-cloud.vpk`
-
----
-
 ## Vita folder layout
 
 ```
