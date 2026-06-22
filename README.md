@@ -36,16 +36,40 @@ Requires HENkaku + iTLS-Enso on the Vita and a server you control (VPS, home ser
 
 ## Server setup
 
-The server image is published to GitHub Container Registry. No build step needed.
+Create a `docker-compose.yml` and `.env` file:
+
+```yaml
+# docker-compose.yml
+services:
+  vita-save-sync:
+    image: ghcr.io/unveroleone/vita-save-sync-server:latest
+    container_name: vita-save-sync
+    restart: unless-stopped
+    ports:
+      - "3099:3000"
+    environment:
+      - USER_TOKEN=${USER_TOKEN:?set a strong token}
+      - DATA_DIR=/data
+    volumes:
+      - vita-save-data:/data
+
+volumes:
+  vita-save-data:
+    driver: local
+```
 
 ```bash
-cd server
-cp .env.example .env
-# Edit .env: set USER_TOKEN to a long random string
+# .env
+USER_TOKEN=change-me-to-a-long-random-string
+```
+
+Then:
+
+```bash
 docker compose up -d
 ```
 
-To update the server later:
+To update later:
 
 ```bash
 docker compose pull && docker compose up -d
@@ -53,11 +77,13 @@ docker compose pull && docker compose up -d
 
 Put it behind Nginx Proxy Manager or Cloudflare Tunnel for HTTPS. The Vita needs HTTPS with a valid certificate — iTLS-Enso provides the modern TLS roots.
 
+> **Note:** `docker compose restart` keeps the old environment. If you change `.env`, run `docker compose up -d` to recreate the container.
+
 Bare metal alternative:
 
 ```bash
 cd server && pnpm install && pnpm run build
-USER_TOKEN=your-secret USER_NAME=you DATA_DIR=/data node dist/index.js
+USER_TOKEN=your-secret DATA_DIR=/data node dist/index.js
 ```
 
 > **Note:** `docker compose restart` keeps the old environment. If you change `.env`, run `docker compose up -d` to recreate the container.
