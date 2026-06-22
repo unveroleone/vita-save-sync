@@ -8,40 +8,41 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    container:
+      image: vitasdk/vitasdk:latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache VitaSDK
-        id: cache-vitasdk
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/vitasdk
-          key: vitasdk-softfp-linux-v2.228
-
-      - name: Install VitaSDK
-        if: steps.cache-vitasdk.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://github.com/vitasdk/buildscripts/releases/download/softfp-linux-v2.228/vitasdk-x86_64-linux-gnu-2022-08-14_14-50-39.tar.bz2 -O vitasdk.tar.bz2
-          sudo tar xf vitasdk.tar.bz2 -C /usr/local
-          rm vitasdk.tar.bz2
+      - name: Install native build tools
+        run: apk add --no-cache gcc musl-dev
 
       - name: Cache Rust
         uses: actions/cache@v4
         with:
           path: |
-            ~/.rustup
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin
+            /root/.rustup
+            /root/.cargo/registry
+            /root/.cargo/git
+            /root/.cargo/bin
           key: rust-nightly-2025-06-01-${{ hashFiles('Cargo.lock') }}
           restore-keys: rust-nightly-2025-06-01-
 
       - name: Install Rust and cargo-vita
+        env:
+          HOME: /root
+          CARGO_HOME: /root/.cargo
+          RUSTUP_HOME: /root/.rustup
         run: |
-          rustup toolchain install nightly-2025-06-01 --component rust-src
-          cargo install cargo-vita --locked
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --default-toolchain none --no-modify-path
+          /root/.cargo/bin/rustup toolchain install nightly-2025-06-01 --component rust-src
+          /root/.cargo/bin/cargo install cargo-vita --locked
+          echo "/root/.cargo/bin" >> "$GITHUB_PATH"
+          echo "CARGO_HOME=/root/.cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=/root/.rustup" >> "$GITHUB_ENV"
+          echo "HOME=/root" >> "$GITHUB_ENV"
 
       - name: Build VPK
         run: cargo vita build vpk --release
