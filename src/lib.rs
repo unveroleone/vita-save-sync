@@ -2,6 +2,7 @@ pub mod api;
 pub mod app;
 pub mod config;
 pub mod constant;
+pub mod emulator;
 pub mod ime;
 pub mod log;
 pub mod sync;

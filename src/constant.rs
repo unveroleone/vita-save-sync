@@ -6,6 +6,11 @@ pub const SCREEN_HEIGHT: i32 = 544;
 // psv game save paths
 pub const GAME_CARD_SAVE_DIR: &str = "grw0:savedata";
 pub const GAME_SAVE_DIR: &str = "ux0:user/00/savedata";
+
+// emulator save paths
+pub const PSP_SAVE_DIR: &str = "ux0:pspemu/PSP/SAVEDATA";
+pub const RETROARCH_DIR: &str = "ux0:data/retroarch";
+
 pub const PSV_DEVICES: [&str; 11] = [
     "ux0:", "uma0:", "grw0:", "os0:", "pd0:", "sa0:", "tm0:", "ud0:", "ur0:", "vd0:", "vs0:",
 ];
