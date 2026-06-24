@@ -16,6 +16,7 @@ pub struct UISettings {
     selected_idx: i32,
     config: Config,
     testing: bool,
+    loading_devices: bool,
     pub dirty: bool,
     pub should_close: bool,
 }
@@ -26,13 +27,14 @@ impl UISettings {
             selected_idx: 0,
             config: config.clone(),
             testing: false,
+            loading_devices: false,
             dirty: false,
             should_close: false,
         }
     }
 
     fn field_count(&self) -> i32 {
-        5 // URL, Token, Device Name, Test Connection, Back
+        6 // URL, Token, Device Name, Test Connection, Connected Devices, Save & Back
     }
 
     fn draw_field(&self, idx: i32, label: &str, value: &str, _is_editable: bool) {
@@ -77,6 +79,23 @@ impl UISettings {
                 msg,
             );
         }
+        if self.loading_devices {
+            let msg = "Loading devices...";
+            vita2d_draw_rect(
+                ((SCREEN_WIDTH - 300) / 2) as f32,
+                (SCREEN_HEIGHT / 2 - 30) as f32,
+                300.0,
+                60.0,
+                rgba(0x22, 0x22, 0x22, 0xee),
+            );
+            vita2d_draw_text(
+                (SCREEN_WIDTH - vita2d_text_width(1.0, msg)) / 2,
+                SCREEN_HEIGHT / 2 + 8,
+                rgba(0xff, 0xff, 0xff, 0xff),
+                1.0,
+                msg,
+            );
+        }
     }
 
     fn test_connection(&mut self) {
@@ -102,21 +121,51 @@ impl UISettings {
             }
         });
     }
+
+    fn show_devices(&mut self) {
+        if self.loading_devices {
+            return;
+        }
+        let config = self.config.clone();
+        self.loading_devices = true;
+        Loading::show();
+        tokio::spawn(async move {
+            let result = Api::get_devices(&config);
+            Loading::hide();
+            match result {
+                Ok(devices) => {
+                    if devices.is_empty() {
+                        Toast::show("No devices paired yet.".to_string());
+                    } else {
+                        let names: Vec<String> = devices
+                            .iter()
+                            .map(|d| d.device_id.clone())
+                            .collect();
+                        Toast::show(format!("{} device(s): {}", devices.len(), names.join(", ")));
+                    }
+                }
+                Err(e) => {
+                    Toast::show(format!("Failed: {}", e));
+                }
+            }
+        });
+    }
 }
 
 impl UIBase for UISettings {
     fn update(&mut self, _app_data: &mut crate::app::AppData, buttons: u32) {
-        if self.testing {
+        if self.testing || self.loading_devices {
             if !Loading::is_pending() {
                 self.testing = false;
+                self.loading_devices = false;
             }
             return;
         }
 
         if is_button(buttons, SceCtrlButtons::SceCtrlCircle) {
-            // Close without saving
+            // Save and close (changed: always persist)
+            self.dirty = true;
             self.should_close = true;
-            self.dirty = false;
             return;
         }
 
@@ -155,6 +204,13 @@ impl UIBase for UISettings {
                     }
                 }
                 4 => {
+                    if self.config.is_configured() {
+                        self.show_devices();
+                    } else {
+                        Toast::show("Set server URL and token first.".to_string());
+                    }
+                }
+                5 => {
                     self.dirty = true;
                     self.should_close = true;
                 }
@@ -184,33 +240,28 @@ impl UIBase for UISettings {
 
         // Test connection button
         let x = 12;
-        let y = 100 + 44 * 3;
+        let y_test = 100 + 44 * 3;
         if self.selected_idx == 3 {
-            vita2d_draw_rect(
-                x as f32,
-                y as f32,
-                (SCREEN_WIDTH - 24) as f32,
-                42.0,
-                rgba(0x44, 0x44, 0x44, 0xff),
-            );
+            vita2d_draw_rect(x as f32, y_test as f32, (SCREEN_WIDTH - 24) as f32, 42.0, rgba(0x44, 0x44, 0x44, 0xff));
         }
-        vita2d_draw_text(x + 8, y + 22, rgba(0x00, 0xb4, 0xd8, 0xff), 1.0, "Test Connection");
+        vita2d_draw_text(x + 8, y_test + 22, rgba(0x00, 0xb4, 0xd8, 0xff), 1.0, "Test Connection");
 
-        // Back
-        let y = 100 + 44 * 4;
+        // Connected Devices button
+        let y_dev = 100 + 44 * 4;
         if self.selected_idx == 4 {
-            vita2d_draw_rect(
-                x as f32,
-                y as f32,
-                (SCREEN_WIDTH - 24) as f32,
-                42.0,
-                rgba(0x44, 0x44, 0x44, 0xff),
-            );
+            vita2d_draw_rect(x as f32, y_dev as f32, (SCREEN_WIDTH - 24) as f32, 42.0, rgba(0x44, 0x44, 0x44, 0xff));
         }
-        vita2d_draw_text(x + 8, y + 22, rgba(0xff, 0x88, 0x88, 0xff), 1.0, "Save && Back");
+        vita2d_draw_text(x + 8, y_dev + 22, rgba(0x00, 0xb4, 0xd8, 0xff), 1.0, "Connected Devices");
+
+        // Save & Back
+        let y_back = 100 + 44 * 5;
+        if self.selected_idx == 5 {
+            vita2d_draw_rect(x as f32, y_back as f32, (SCREEN_WIDTH - 24) as f32, 42.0, rgba(0x44, 0x44, 0x44, 0xff));
+        }
+        vita2d_draw_text(x + 8, y_back + 22, rgba(0xff, 0x88, 0x88, 0xff), 1.0, "Save && Back");
 
         // Bottom bar
-        let bar = "(X) Edit    (O) Back";
+        let bar = "(X) Edit    (O) Save & Back";
         vita2d_line(
             0.0,
             (SCREEN_HEIGHT - 58) as f32,

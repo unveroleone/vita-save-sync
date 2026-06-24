@@ -42,16 +42,16 @@ pub const TEXT_R: &str = "-> R";
 
 // desktop bottom bar
 pub const DESKTOP_BOTTOM_BAR_TEXT: &str =
-    "(START) Exit    (□) About    (△) Menu    (X) Saves";
+    "(START) Exit    (□) About    (△) Menu    (X) Saves    (SEL) Refresh";
 pub const DESKTOP_BOTTOM_BAR_CLOUD_TEXT: &str =
-    "(START) Exit  (X) Sync All  (△) Settings";
+    "(START) Exit  (X) Action  (□) Sync All  (△) Settings  (SEL) Refresh";
 
 // save drawer (local tab)
 pub const SAVE_DRAWER_BOTTOM_BAR_TEXT: &str =
     "(SEL)Up  (□)Restore  (△)Del  (〇)Close  (X)Sel";
 // save drawer (cloud/server tab)
 pub const SAVE_DRAWER_CLOUD_BOTTOM_BAR_TEXT: &str =
-    "(SEL) Download  (□) Restore  (△) Delete  (〇) Close  (X) Select";
+    "(□) Restore  (△) Delete  (〇) Close  (X) Select";
 pub const ACTION_DRAWER_BOTTOM_BAR_TEXT: &str = "(〇) Close    (X) Select";
 pub const TITLE_DRAWER_BOTTOM_BAR_TEXT: &str = "(〇) Close    (X) Select";
 

@@ -6,6 +6,17 @@ pub struct SyncConfig {
     pub server_url: String,
     pub api_token: String,
     pub device_name: String,
+    #[serde(default)]
+    pub sources: Vec<SourceConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceConfig {
+    pub id: String,
+    pub platform: String,
+    #[serde(rename = "customPath")]
+    pub custom_path: String,
+    pub label: String,
 }
 
 impl Default for SyncConfig {
@@ -14,6 +25,7 @@ impl Default for SyncConfig {
             server_url: String::new(),
             api_token: String::new(),
             device_name: hostname(),
+            sources: Vec::new(),
         }
     }
 }

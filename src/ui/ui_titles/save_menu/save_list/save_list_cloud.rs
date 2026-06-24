@@ -42,7 +42,6 @@ impl QrCodeState {
 enum CloudItem {
     UploadAction,
     ServerBackup(CloudGameEntry),
-    DownloadAction,
     DownloadRestoreAction,
 }
 
@@ -86,7 +85,7 @@ impl SaveListCloud {
     }
 
     fn item_count(&self) -> i32 {
-        2 + if self.cloud_entry.read().unwrap().is_some() { 2 } else { 0 }
+        1 + if self.cloud_entry.read().unwrap().is_some() { 2 } else { 0 }
     }
 
     fn get_cloud_item(&self, idx: i32) -> Option<CloudItem> {
@@ -97,13 +96,6 @@ impl SaveListCloud {
                 entry.clone().map(CloudItem::ServerBackup)
             }
             2 => {
-                if self.cloud_entry.read().unwrap().is_some() {
-                    Some(CloudItem::DownloadAction)
-                } else {
-                    None
-                }
-            }
-            3 => {
                 if self.cloud_entry.read().unwrap().is_some() {
                     Some(CloudItem::DownloadRestoreAction)
                 } else {
@@ -324,7 +316,45 @@ impl UIList for SaveListCloud {
         self.upload_current_save(game_save_dir, None);
     }
 
-    fn do_delete_game_save(&self, _backup_name: &str) {}
+    fn do_delete_game_save(&self, _backup_name: &str) {
+        let config = Config::global();
+        if !config.is_configured() {
+            Toast::show("Configure server in Settings first.".to_string());
+            return;
+        }
+
+        if self.cloud_entry.read().unwrap().is_none() {
+            Toast::show("No server backup to delete.".to_string());
+            return;
+        }
+
+        if !UIDialog::present(&format!(
+            "Delete server backup for {}?",
+            self.title_name
+        )) {
+            return;
+        }
+
+        let title_id = self.title_id.clone();
+        let cloud_entry = Arc::clone(&self.cloud_entry);
+        let pending = Arc::clone(&self.pending);
+        pending.store(true, Ordering::Relaxed);
+        Loading::show();
+        tokio::spawn(async move {
+            match Api::delete_save(&config, &title_id) {
+                Ok(_) => {
+                    *cloud_entry.write().unwrap() = None;
+                    Toast::show("Deleted from server.".to_string());
+                }
+                Err(e) => {
+                    error!("delete {} failed: {}", title_id, e);
+                    Toast::show(format!("Delete failed: {}", e));
+                }
+            }
+            Loading::hide();
+            pending.store(false, Ordering::Relaxed);
+        });
+    }
 
     fn update(&mut self, game_save_dir: &Option<String>, buttons: u32) {
         self.scroll_progress.update(buttons);
@@ -336,18 +366,19 @@ impl UIList for SaveListCloud {
                     CloudItem::UploadAction => {
                         self.do_backup_game_save(game_save_dir, None);
                     }
-                    CloudItem::DownloadAction => {
-                        self.download_from_server(game_save_dir, false);
-                    }
                     CloudItem::DownloadRestoreAction => {
                         self.download_from_server(game_save_dir, true);
                     }
                     CloudItem::ServerBackup(_) => {
-                        // Selecting the server backup info: download
-                        self.download_from_server(game_save_dir, false);
+                        // ServerBackup row: selecting it does Download & Restore
+                        self.download_from_server(game_save_dir, true);
                     }
                 }
             }
+        }
+
+        if is_button(buttons, SceCtrlButtons::SceCtrlTriangle) {
+            self.do_delete_game_save("");
         }
 
         self.list_state.update(self.item_count(), buttons);
@@ -390,9 +421,13 @@ impl UIList for SaveListCloud {
             let text = match self.get_cloud_item(i) {
                 Some(CloudItem::UploadAction) => self.new_backup_text.to_string(),
                 Some(CloudItem::ServerBackup(ref entry)) => {
-                    format!("Server: {} ({})", entry.latest_version, format_size(entry.size))
+                    let vc = if entry.version_count > 0 {
+                        format!(", {} version(s)", entry.version_count)
+                    } else {
+                        String::new()
+                    };
+                    format!("Server: {} ({}){}", entry.latest_version, format_size(entry.size), vc)
                 }
-                Some(CloudItem::DownloadAction) => "Download from server".to_string(),
                 Some(CloudItem::DownloadRestoreAction) => "Download & Restore".to_string(),
                 None => continue,
             };
@@ -400,7 +435,6 @@ impl UIList for SaveListCloud {
             let color = match self.get_cloud_item(i) {
                 Some(CloudItem::UploadAction) => rgba(0x00, 0xb4, 0xd8, 0xff),
                 Some(CloudItem::ServerBackup(_)) => rgba(0xee, 0xee, 0xee, 0xff),
-                Some(CloudItem::DownloadAction) => rgba(0x88, 0xff, 0x88, 0xff),
                 Some(CloudItem::DownloadRestoreAction) => rgba(0xff, 0xaa, 0x44, 0xff),
                 None => rgba(0xff, 0xff, 0xff, 0xff),
             };

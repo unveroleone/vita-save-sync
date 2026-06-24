@@ -75,6 +75,72 @@ fn zip_inner(
     Ok(())
 }
 
+/// Zip multiple directories into one archive, each under its own folder name.
+/// `sources` is a slice of `(zip_folder_name, fs_path)` pairs.
+pub fn zip_dirs(sources: &[(String, String)], to: &str) -> Result<(), String> {
+    let output_path = Path::new(to);
+    if let Some(parent) = output_path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| format!("Create dir failed: {}", e))?;
+        }
+    }
+    let file = fs::File::create(output_path).map_err(|e| format!("Create zip failed: {}", e))?;
+    let mut zip = ZipWriter::new(file);
+    let options = zip::write::FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for (folder_name, dir_path) in sources {
+        let root = if dir_path.ends_with('/') {
+            dir_path.clone()
+        } else {
+            format!("{}/", dir_path)
+        };
+        zip.add_directory(format!("{}/", folder_name), options)
+            .map_err(|e| format!("Zip add dir failed: {}", e))?;
+        zip_inner_named(&mut zip, Path::new(&root), &root, folder_name, &options)?;
+    }
+
+    zip.finish().map_err(|e| format!("Finish zip failed: {}", e))?;
+    Ok(())
+}
+
+fn zip_inner_named(
+    zip: &mut ZipWriter<fs::File>,
+    dir: &Path,
+    root: &str,
+    zip_base: &str,
+    options: &zip::write::FileOptions,
+) -> Result<(), String> {
+    let mut buffer = vec![0u8; 1024 * 512];
+    for entry in dir.read_dir().map_err(|e| format!("Read dir failed: {}", e))? {
+        let entry = entry.map_err(|e| format!("Dir entry failed: {}", e))?;
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(Path::new(root))
+            .map_err(|e| format!("Strip prefix failed: {}", e))?;
+        let entry_name = format!("{}/{}", zip_base, relative.to_string_lossy());
+
+        if path.is_file() {
+            zip.start_file(&entry_name, *options)
+                .map_err(|e| format!("Zip start file failed: {}", e))?;
+            let mut f = fs::File::open(&path).map_err(|e| format!("Open file failed: {}", e))?;
+            loop {
+                let n = f.read(&mut buffer).map_err(|e| format!("Read failed: {}", e))?;
+                if n == 0 {
+                    break;
+                }
+                zip.write_all(&buffer[..n])
+                    .map_err(|e| format!("Zip write failed: {}", e))?;
+            }
+        } else {
+            zip.add_directory(format!("{}/", entry_name), *options)
+                .map_err(|e| format!("Zip add dir failed: {}", e))?;
+            zip_inner_named(zip, &path, root, zip_base, options)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn zip_extract(from: &str, to: &str) -> Result<(), String> {
     let file = fs::File::open(from).map_err(|e| format!("Open zip failed: {}", e))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Read zip failed: {}", e))?;
