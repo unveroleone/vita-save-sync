@@ -4,6 +4,7 @@ import { statusRoutes } from './routes/status.js';
 import { authRoutes } from './routes/auth.js';
 import { manifestRoutes } from './routes/manifest.js';
 import { savesRoutes } from './routes/saves.js';
+import { devicesRoutes } from './routes/devices.js';
 
 const app = Fastify({ logger: true });
 
@@ -17,6 +18,7 @@ app.register(statusRoutes);
 app.register(authRoutes);
 app.register(manifestRoutes);
 app.register(savesRoutes);
+app.register(devicesRoutes);
 
 const port = parseInt(process.env.PORT ?? '3000', 10);
 

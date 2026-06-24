@@ -110,4 +110,27 @@ export async function savesRoutes(app: FastifyInstance): Promise<void> {
         .send(data);
     }
   );
+
+  app.delete<{ Params: SaveParams }>(
+    '/api/save/:titleId',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest<{ Params: SaveParams }>, reply: FastifyReply) => {
+      const { titleId } = request.params;
+      const userName = getUserName();
+      const dir = titleDir(userName, titleId);
+
+      if (!fs.existsSync(dir)) {
+        return reply.code(404).send({ ok: false, error: 'No save found for ' + titleId });
+      }
+
+      fs.rmSync(dir, { recursive: true, force: true });
+
+      const manifest = readManifest(userName);
+      delete manifest.games[titleId];
+      manifest.updatedAt = new Date().toISOString();
+      writeManifest(userName, manifest);
+
+      reply.send({ ok: true, titleId });
+    }
+  );
 }
