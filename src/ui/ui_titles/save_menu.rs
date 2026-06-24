@@ -41,24 +41,36 @@ impl SaveMenu {
         }
     }
 
-    pub fn init_list(&mut self, title: &Title) {
-        self.game_save_dir = None;
-        for game_save_dir in [
-            format!("{}/{}", GAME_CARD_SAVE_DIR, title.real_id()),
-            format!("{}/{}", GAME_SAVE_DIR, title.real_id()),
-        ] {
-            let path = Path::new(&game_save_dir);
-            if path.exists() {
-                self.game_save_dir = Some(game_save_dir);
-                break;
-            }
-        }
-        // init save list
+    pub fn open_for(
+        &mut self,
+        title_id: &str,
+        name: &str,
+        source_path: Option<String>,
+        needs_pfs: bool,
+    ) {
+        self.game_save_dir = source_path;
         let config = Arc::new(RwLock::new(Config::global()));
-        self.local = Some(Box::new(SaveListLocal::new(NEW_BACKUP, title, Arc::clone(&config))));
-        self.cloud = Some(Box::new(SaveListCloud::new(NEW_CLOUD_BACKUP, title, config)));
-        // init selected list
+        self.local = Some(Box::new(SaveListLocal::new(
+            NEW_BACKUP,
+            title_id,
+            name,
+            needs_pfs,
+            Arc::clone(&config),
+        )));
+        self.cloud = Some(Box::new(SaveListCloud::new(
+            NEW_CLOUD_BACKUP,
+            title_id,
+            name,
+            needs_pfs,
+            config,
+        )));
         self.init_save_list();
+        if self.drawer.is_none() {
+            self.drawer = Some(UIDrawer::new());
+        }
+        if let Some(drawer) = &mut self.drawer {
+            drawer.open();
+        }
     }
 
     pub fn free_list(&mut self) {
@@ -88,13 +100,17 @@ impl SaveMenu {
     }
 
     pub fn open(&mut self, title: &Title) {
-        self.init_list(title);
-        if self.drawer.is_none() {
-            self.drawer = Some(UIDrawer::new());
+        let mut source_path = None;
+        for path in [
+            format!("{}/{}", GAME_CARD_SAVE_DIR, title.real_id()),
+            format!("{}/{}", GAME_SAVE_DIR, title.real_id()),
+        ] {
+            if Path::new(&path).exists() {
+                source_path = Some(path);
+                break;
+            }
         }
-        if let Some(drawer) = &mut self.drawer {
-            drawer.open();
-        }
+        self.open_for(title.title_id(), title.name(), source_path, true);
     }
 
     pub fn close(&mut self) {

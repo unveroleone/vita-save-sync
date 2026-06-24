@@ -10,4 +10,9 @@ server/.env
 
 # Local cargo config (machine-specific paths)
 .cargo/
-.DS_Store
+
+# Save Sync Hub (Tauri)
+save-sync-hub/node_modules/
+save-sync-hub/dist/
+save-sync-hub/src-tauri/target/
+save-sync-hub/src-tauri/gen/

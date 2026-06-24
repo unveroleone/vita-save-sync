@@ -14,7 +14,7 @@ use crate::{
     config::Config,
     constant::{LIST_NAME_WIDTH, SCREEN_WIDTH},
     ime::{get_current_format_time, show_keyboard},
-    tai::{mount_pfs, Title},
+    tai::mount_pfs,
     ui::{
         ui_cloud::list_state::ListState, ui_dialog::UIDialog, ui_list::UIList, ui_loading::Loading,
         ui_scroll_progress::ScrollProgress, ui_toast::Toast,
@@ -37,6 +37,7 @@ pub struct SaveListLocal {
     local_dir: String,
     title_id: String,
     title_name: String,
+    needs_pfs: bool,
     items: Arc<RwLock<Vec<String>>>,
     new_backup_text: &'static str,
     scroll_progress: ScrollProgress,
@@ -44,13 +45,20 @@ pub struct SaveListLocal {
 }
 
 impl SaveListLocal {
-    pub fn new(new_back: &'static str, title: &Title, config: Arc<RwLock<Config>>) -> SaveListLocal {
+    pub fn new(
+        new_back: &'static str,
+        title_id: &str,
+        title_name: &str,
+        needs_pfs: bool,
+        config: Arc<RwLock<Config>>,
+    ) -> SaveListLocal {
         SaveListLocal {
             list_state: ListState::new(DISPLAY_ROW),
             pending: Arc::new(AtomicBool::new(false)),
-            local_dir: get_game_local_backup_dir(&title.title_id(), &title.name()),
-            title_id: title.title_id().to_string(),
-            title_name: title.name().to_string(),
+            local_dir: get_game_local_backup_dir(title_id, title_name),
+            title_id: title_id.to_string(),
+            title_name: title_name.to_string(),
+            needs_pfs,
             items: Arc::new(RwLock::new(vec![])),
             new_backup_text: new_back,
             scroll_progress: ScrollProgress::new(40.0, 100.0),
@@ -143,7 +151,9 @@ impl UIList for SaveListLocal {
                 let pending = Arc::clone(&self.pending);
                 pending.store(true, Ordering::Relaxed);
                 Loading::show();
-                mount_pfs(&game_save_dir);
+                if self.needs_pfs {
+                    mount_pfs(&game_save_dir);
+                }
                 tokio::spawn(async move {
                     Loading::notify_title("Restoring save...".to_string());
                     match restore_game_save(&backup_path, &game_save_dir) {
@@ -191,7 +201,9 @@ impl UIList for SaveListLocal {
                     let pending = Arc::clone(&self.pending);
                     pending.store(true, Ordering::Relaxed);
                     Loading::show();
-                    mount_pfs(&game_save_dir);
+                    if self.needs_pfs {
+                        mount_pfs(&game_save_dir);
+                    }
                     tokio::spawn(async move {
                         Loading::notify_title("Backing up...".to_string());
                         match backup_game_save(&game_save_dir, &backup_name) {

@@ -1,22 +1,23 @@
 <p align="center">
-  <img src="screenshot-game.png" width="480" alt="Save Sync on PS Vita">
+  <img src="assets/icons/save-sync-transparent.png" width="200" alt="Save Sync on PS Vita">
 </p>
 
 <h1 align="center">Save Sync</h1>
 
 <p align="center">
-  <em>Manual cloud save sync for modded PS Vitas and PSTVs, self-hosted</em>
+  <em>Self-hosted cloud save sync for PS Vita, PPSSPP, and RetroArch, across all your devices</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/v/release/unveroleone/vita-save-sync" alt="version">
   <img src="https://img.shields.io/badge/server-Node.js%20%7C%20Fastify-111111?style=flat-square" alt="Node.js">
-  <img src="https://img.shields.io/badge/client-Rust%20%2B%20vita2d-111111?style=flat-square" alt="Rust">
+  <img src="https://img.shields.io/badge/vita-Rust%20%2B%20vita2d-111111?style=flat-square" alt="Vita client">
+  <img src="https://img.shields.io/badge/desktop%20%2F%20android-Tauri%20v2%20%2B%20Svelte-111111?style=flat-square" alt="Desktop client">
   <img src="https://img.shields.io/badge/license-GPL--3.0-111111?style=flat-square" alt="GPL-3.0">
 </p>
 
 <p align="center">
-  <strong>Play on Vita A &middot; Upload &middot; Pull on Vita B &middot; Restore</strong><br>
+  <strong>Play anywhere &middot; Upload your save &middot; Restore on any device</strong><br>
   <sub>Forked from <a href="https://github.com/save-cloud">Save Cloud Vita</a>. Baidu Cloud replaced with a self-hosted HTTP API. All strings translated to English.</sub>
 </p>
 
@@ -24,19 +25,46 @@
 
 ## What it does
 
-- Backs up PS Vita save data to a zip locally, then uploads to your own server
-- Downloads saves from the server to another device
-- Restores downloaded saves (creates a safety backup first)
-- Shows per-game sync status on the Cloud tab
-- TLS via iTLS-Enso + rustls on Vita
+One server, multiple clients. All saves go to the same place.
 
-Requires HENkaku + iTLS-Enso on the Vita and a server you control (VPS, home server, etc.).
+**PS Vita app**:
+- Backs up native PS Vita saves, PSP/Adrenaline saves, and RetroArch saves
+- Uploads to your server as a zip, downloads and restores on another Vita
+- Shows per-game sync status on the Cloud tab with one-tap Sync All
+
+**Save Sync Hub** (Desktop / Android):
+- Syncs PPSSPP and RetroArch saves from macOS, Windows, Linux, and Android
+- Detects default save locations automatically per platform
+- Upload to server, download to local, or restore directly from cloud
+- Connects to the same server and same API as the Vita app
+
+---
+
+## Clients at a glance
+
+| Client | Runs on | Emu  lators / saves |
+|--------|---------|-------------------|
+| Save Sync (Vita app) | PS Vita, PSTV | Native Vita · PSP (Adrenaline) · RetroArch |
+| Save Sync Hub | macOS · Windows · Linux · Android | PPSSPP · RetroArch · Custom path |
+
+The Vita app requires HENkaku + iTLS-Enso. Save Sync Hub is a standard desktop/Android app (no jailbreak needed on the other end).
 
 ---
 
 ## Server setup
 
-Create a `docker-compose.yml` and `.env` file:
+The server is a small Node.js app. It stores save files on disk and exposes a REST API. You need to keep it running while you sync, it does not need to be on 24/7.
+
+Pick the option that fits your situation.
+
+---
+
+<details>
+<summary><strong>Option A | Docker</strong></summary>
+
+<br>
+
+If you have Docker installed ([Docker Desktop](https://www.docker.com/products/docker-desktop/) for macOS/Windows, or `apt install docker.io` on Linux), create two files and run one command:
 
 ```yaml
 # docker-compose.yml
@@ -63,28 +91,177 @@ volumes:
 USER_TOKEN=change-me-to-a-long-random-string
 ```
 
-Then:
-
 ```bash
 docker compose up -d
 ```
 
-To update later:
+To update later: `docker compose pull && docker compose up -d`
+
+> **Note:** `docker compose restart` reuses the cached environment. If you change `.env`, run `docker compose up -d` instead.
+
+Put the server behind Nginx Proxy Manager or Cloudflare Tunnel for HTTPS. The Vita needs HTTPS with a valid certificate; iTLS-Enso provides the modern TLS roots.
+
+</details>
+
+---
+
+<details>
+<summary><strong>Option B | Node.js directly</strong> &nbsp;(quickest to get started)</summary>
+
+<br>
+
+You need [Node.js](https://nodejs.org/) 20 or newer. Works on macOS, Windows, and Linux.
 
 ```bash
-docker compose pull && docker compose up -d
+git clone https://github.com/unveroleone/vita-save-sync.git
+cd vita-save-sync/server
+npm install
+npm run build
+USER_TOKEN=your-secret-token DATA_DIR=./data node dist/index.js
 ```
 
-Put it behind Nginx Proxy Manager or Cloudflare Tunnel for HTTPS. The Vita needs HTTPS with a valid certificate — iTLS-Enso provides the modern TLS roots.
+The server listens on port 3000. Add `PORT=3099` to the command if you need a different port.
 
-> **Note:** `docker compose restart` keeps the old environment. If you change `.env`, run `docker compose up -d` to recreate the container.
+</details>
 
-Bare metal alternative:
+---
+
+<details>
+<summary><strong>Option C | Raspberry Pi</strong> &nbsp;(always-on home server)</summary>
+
+<br>
+
+Start from a fresh Raspberry Pi OS (Bookworm or newer). Ethernet is recommended for reliability, but Wi-Fi works too.
+
+**Install Node.js (LTS):**
 
 ```bash
-cd server && pnpm install && pnpm run build
-USER_TOKEN=your-secret DATA_DIR=/data node dist/index.js
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs git
 ```
+
+**Clone and start:**
+
+```bash
+git clone https://github.com/unveroleone/vita-save-sync.git
+cd vita-save-sync/server
+npm install
+npm run build
+USER_TOKEN=your-secret-token DATA_DIR=./data node dist/index.js
+```
+
+**Auto-start on boot with systemd:**
+
+Replace `pi` with your actual username if it differs (run `whoami` to check).
+
+```bash
+sudo tee /etc/systemd/system/vita-save-sync.service << 'EOF'
+[Unit]
+Description=Save Sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/vita-save-sync/server
+Environment=USER_TOKEN=your-secret-token
+Environment=DATA_DIR=/home/pi/vita-save-sync/server/data
+Environment=PORT=3000
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now vita-save-sync
+```
+
+Check status: `sudo systemctl status vita-save-sync`
+
+</details>
+
+---
+
+<details>
+<summary><strong>Option D | Background service on your laptop</strong> &nbsp;(macOS / Linux / Windows)</summary>
+
+<br>
+
+**macOS**: create a launchd plist so the server starts automatically at login.
+
+First find your Node.js path: `which node` (commonly `/usr/local/bin/node` on Intel, `/opt/homebrew/bin/node` on Apple Silicon).
+
+Save this as `~/Library/LaunchAgents/com.vita-save-sync.plist`, replacing the paths and token:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vita-save-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/you/vita-save-sync/server/dist/index.js</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>USER_TOKEN</key>
+        <string>your-secret-token</string>
+        <key>DATA_DIR</key>
+        <string>/Users/you/vita-save-sync/server/data</string>
+        <key>PORT</key>
+        <string>3000</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/Users/you/vita-save-sync/server</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+```
+
+Load it: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vita-save-sync.plist`
+
+---
+
+**Linux**: use the systemd unit from Option C. Same file, same commands.
+
+---
+
+**Windows**: run a terminal on login and keep it open, or use Task Scheduler to launch `node dist/index.js` at boot with `USER_TOKEN` and `DATA_DIR` set as environment variables.
+
+</details>
+
+---
+
+### HTTPS
+
+The Vita requires HTTPS with a valid certificate. The easiest option is **Cloudflare Quick Tunnel** (no account or domain needed). Install and run:
+
+| Platform | Install command |
+|----------|----------------|
+| macOS | `brew install cloudflared` |
+| Linux | `curl -L https://pkg.cloudflare.com/install.sh \| sudo bash && sudo apt install cloudflared` |
+| Windows | `winget install -e --id Cloudflare.cloudflared` |
+
+While your server is running:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+It prints a `*.trycloudflare.com` address. Use that as the server URL on the Vita. The tunnel closes when you close the terminal, which is fine for occasional sync sessions.
+
+For a permanent setup with your own domain, [Cloudflare Tunnel with a named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is also free.
 
 ---
 
@@ -97,12 +274,52 @@ Install the VPK via [VitaDB Downloader](https://www.rinnegatamante.eu/vitadb/#/i
 3. Press **R** to switch to the Cloud tab
 4. Press **Triangle** to open Settings
 5. Fill in **Server URL** (e.g. `https://vita-sync.example.com`), **API Token**, and **Device Name**
-6. Select **Test Connection** — it checks both reachability and your token
+6. Select **Test Connection** (checks both reachability and your token)
 7. Press **o** to go back, or select **Save && Back**
+
+<p align="center">
+  <img src="screenshot-game.png" width="480" alt="Save Sync on PS Vita">
+</p>
 
 ---
 
-## Workflow
+## Save Sync Hub (Desktop / Android)
+
+Save Sync Hub is the companion app for PC and Android. It syncs PPSSPP and RetroArch saves using the same server and API token as the Vita app.
+
+Download the latest release from [GitHub Releases](https://github.com/unveroleone/vita-save-sync/releases) for your platform (`.dmg` for macOS, `.exe` for Windows, `.AppImage` for Linux, `.apk` for Android).
+
+### First-time setup
+
+1. Open Save Sync Hub
+2. In the sidebar, enter your **Server URL**, **API Token**, and **Device Name** (same values as on the Vita)
+3. Click **Save Config**
+4. Select your platform (PSP / RetroArch / Custom path)
+5. The app auto-fills the default save folder for your OS, or browse to a custom path
+6. Click **Scan Saves** to list your save directories
+
+### Default save paths
+
+| Platform | PPSSPP | RetroArch |
+|----------|--------|-----------|
+| macOS | `~/Documents/PPSSPP/PSP/SAVEDATA` | `~/Library/Application Support/RetroArch` |
+| Windows | `%USERPROFILE%\Documents\PPSSPP\PSP\SAVEDATA` | `%APPDATA%\RetroArch` |
+| Linux | `~/.config/ppsspp/PSP/SAVEDATA` | `~/.config/retroarch` |
+| Android | `/storage/emulated/0/PSP/SAVEDATA` | `/storage/emulated/0/RetroArch` |
+
+> These are the most common defaults. PPSSPP varies by install method — if your saves are not found, use Browse to point to the right folder. For RetroArch, the app scans for `saves/` and `states/` subdirectories inside the path above.
+
+### Workflow
+
+- **Upload**: zips the save folder and sends it to the server
+- **Download**: fetches the latest backup from the server to a local zip
+- **Restore**: downloads from the server and extracts directly into the save folder
+
+Save IDs on the server use the folder name as the title ID, prefixed with `PSP_` or `RA_` to avoid collisions with native Vita saves.
+
+---
+
+## Workflow (PS Vita)
 
 ### Uploading a save to the server
 
@@ -142,7 +359,7 @@ Press **R** (main screen) to switch to the Cloud tab. It shows every game with a
 | Cloud Only | On server, not on this Vita |
 | Conflict | Both sides changed |
 
-Press **X** to run **Sync All** — it uploads everything marked Upload and downloads everything marked Download. Conflicts are reported but not touched.
+Press **X** to run **Sync All**. It uploads everything marked Upload and downloads everything marked Download. Conflicts are reported but not touched.
 
 Press **Triangle** to open Settings.
 
@@ -165,23 +382,10 @@ Upload sends `X-Save-Hash` (SHA-256), `X-Save-Timestamp`, and `X-Device-Id` head
 
 ---
 
-## Vita folder layout
-
-```
-ux0:data/save-sync/
-  config.json          # server URL, token, device name
-  backups/
-    PCSE00001/
-      2026-06-21 15.42.00.zip   # local backup zips
-  logs/
-    latest.log
-```
-
----
-
 ## Credits
 
 Forked from [Save Cloud Vita](https://github.com/save-cloud) by iamcco.
-Uses [VitaShell](https://github.com/TheOfficialFloW/VitaShell) SQLite VFS and kernel modules, [vita-rust](https://github.com/vita-rust), [VitaSDK](https://github.com/vitasdk).
+Vita app uses [VitaShell](https://github.com/TheOfficialFloW/VitaShell) SQLite VFS and kernel modules, [vita-rust](https://github.com/vita-rust), [VitaSDK](https://github.com/vitasdk).
+Save Sync Hub built with [Tauri v2](https://tauri.app) and [Svelte 5](https://svelte.dev).
 
 Built with the help of AI

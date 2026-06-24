@@ -14,7 +14,7 @@ use crate::{
     config::Config,
     constant::SCREEN_WIDTH,
     ime::{get_current_format_time, show_keyboard},
-    tai::{mount_pfs, Title},
+    tai::mount_pfs,
     ui::{
         ui_cloud::list_state::ListState, ui_dialog::UIDialog, ui_list::UIList, ui_loading::Loading,
         ui_scroll_progress::ScrollProgress, ui_toast::Toast,
@@ -52,6 +52,7 @@ pub struct SaveListCloud {
     local_dir: String,
     title_id: String,
     title_name: String,
+    needs_pfs: bool,
     new_backup_text: &'static str,
     scroll_progress: ScrollProgress,
     cloud_entry: Arc<RwLock<Option<CloudGameEntry>>>,
@@ -59,13 +60,20 @@ pub struct SaveListCloud {
 }
 
 impl SaveListCloud {
-    pub fn new(new_backup_text: &'static str, title: &Title, config: Arc<RwLock<Config>>) -> SaveListCloud {
+    pub fn new(
+        new_backup_text: &'static str,
+        title_id: &str,
+        title_name: &str,
+        needs_pfs: bool,
+        config: Arc<RwLock<Config>>,
+    ) -> SaveListCloud {
         SaveListCloud {
             list_state: ListState::new(DISPLAY_ROW),
             pending: Arc::new(AtomicBool::new(false)),
-            local_dir: get_game_local_backup_dir(&title.title_id(), &title.name()),
-            title_id: title.title_id().to_string(),
-            title_name: title.name().to_string(),
+            local_dir: get_game_local_backup_dir(title_id, title_name),
+            title_id: title_id.to_string(),
+            title_name: title_name.to_string(),
+            needs_pfs,
             new_backup_text,
             scroll_progress: ScrollProgress::new(40.0, 100.0),
             cloud_entry: Arc::new(RwLock::new(None)),
@@ -164,7 +172,9 @@ impl SaveListCloud {
         let pending = Arc::clone(&self.pending);
         pending.store(true, Ordering::Relaxed);
         Loading::show();
-        mount_pfs(&game_save_dir);
+        if self.needs_pfs {
+            mount_pfs(&game_save_dir);
+        }
         tokio::spawn(async move {
             Loading::notify_title("Backing up & uploading...".to_string());
             match backup_game_save(&game_save_dir, &backup_path) {
@@ -245,6 +255,7 @@ impl SaveListCloud {
         let title_id = self.title_id.clone();
         let local_dir = self.local_dir();
         let game_save_dir = game_save_dir.clone();
+        let needs_pfs = self.needs_pfs;
         let pending = Arc::clone(&self.pending);
         pending.store(true, Ordering::Relaxed);
         Loading::show();
@@ -263,7 +274,9 @@ impl SaveListCloud {
                 Ok(_) => {
                     if restore {
                         if let Some(ref gsd) = game_save_dir {
-                            mount_pfs(gsd);
+                            if needs_pfs {
+                                mount_pfs(gsd);
+                            }
                             Loading::notify_title("Restoring save...".to_string());
                             match restore_game_save(&dl_path, gsd) {
                                 Ok(_) => Toast::show("Save restored!".to_string()),
