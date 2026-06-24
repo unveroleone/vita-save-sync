@@ -21,6 +21,16 @@ pub struct CloudGameEntry {
     #[serde(rename = "uploadedBy")]
     pub uploaded_by: String,
     pub size: u64,
+    #[serde(rename = "versionCount", default)]
+    pub version_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceEntry {
+    #[serde(rename = "deviceId")]
+    pub device_id: String,
+    #[serde(rename = "pairedAt")]
+    pub paired_at: String,
 }
 
 fn build_url(config: &SyncConfig, path: &str) -> String {
@@ -119,4 +129,32 @@ pub fn download_save(config: &SyncConfig, title_id: &str, dest_path: &str) -> Re
     }
     std::fs::write(dest_path, &buf).map_err(|e| format!("Write file failed: {}", e))?;
     Ok(())
+}
+
+pub fn delete_save(config: &SyncConfig, title_id: &str) -> Result<(), String> {
+    let url = build_url(config, &format!("/api/save/{}", title_id));
+    let response = ureq::delete(&url)
+        .set("Authorization", &auth_value(config))
+        .call()
+        .map_err(|e| format!("Delete failed: {}", e))?;
+
+    if response.status() != 200 {
+        let body = response
+            .into_string()
+            .unwrap_or_else(|_| "unknown".to_string());
+        return Err(format!("Delete failed: {}", body));
+    }
+    Ok(())
+}
+
+pub fn get_devices(config: &SyncConfig) -> Result<Vec<DeviceEntry>, String> {
+    let url = build_url(config, "/api/devices");
+    let response = ureq::get(&url)
+        .set("Authorization", &auth_value(config))
+        .call()
+        .map_err(|e| format!("Request failed: {}", e))?;
+    let body = response
+        .into_string()
+        .map_err(|e| format!("Read response failed: {}", e))?;
+    serde_json::from_str(&body).map_err(|e| format!("Parse devices failed: {}", e))
 }

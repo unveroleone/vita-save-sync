@@ -35,6 +35,13 @@ export interface GameEntry {
   latestHash: string;
   uploadedBy: string;
   size: number;
+  versionCount?: number;
+}
+
+export function countVersions(userName: string, titleId: string): number {
+  const versionsPath = path.join(titleDir(userName, titleId), 'versions');
+  if (!fs.existsSync(versionsPath)) return 0;
+  return fs.readdirSync(versionsPath).filter(f => f.endsWith('.zip')).length;
 }
 
 export interface Manifest {

@@ -15,7 +15,10 @@ pub struct GameSyncEntry {
     pub local_timestamp: Option<String>,
     pub cloud_hash: Option<String>,
     pub cloud_timestamp: Option<String>,
+    /// Hash of local directory at the time of last sync.
     pub last_synced_hash: Option<String>,
+    /// Hash of cloud zip at the time of last sync.
+    pub last_synced_cloud_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,22 +54,28 @@ pub fn compute_status(entry: &GameSyncEntry) -> SyncStatus {
     match (
         &entry.local_hash,
         &entry.cloud_hash,
-        &entry.last_synced_hash,
     ) {
-        (None, None, _) => SyncStatus::LocalOnly,
-        (Some(_), None, _) => SyncStatus::LocalOnly,
-        (None, Some(_), _) => SyncStatus::CloudOnly,
-        (Some(local), Some(cloud), last_synced) => {
-            if local == cloud {
-                return SyncStatus::InSync;
-            }
-            let local_changed = last_synced.as_ref().map(|h| h != local).unwrap_or(true);
-            let cloud_changed = last_synced.as_ref().map(|h| h != cloud).unwrap_or(true);
+        (None, None) => SyncStatus::LocalOnly,
+        (Some(_), None) => SyncStatus::LocalOnly,
+        (None, Some(_)) => SyncStatus::CloudOnly,
+        (Some(local), Some(_cloud)) => {
+            // Use separate reference hashes because local (dir hash) and
+            // cloud (zip hash) are computed differently and never equal.
+            let local_changed = entry
+                .last_synced_hash
+                .as_ref()
+                .map(|h| h != local)
+                .unwrap_or(true);
+            let cloud_changed = entry
+                .last_synced_cloud_hash
+                .as_ref()
+                .map(|h| h != _cloud)
+                .unwrap_or(true);
             match (local_changed, cloud_changed) {
+                (false, false) => SyncStatus::InSync,
                 (true, false) => SyncStatus::UploadNeeded,
                 (false, true) => SyncStatus::DownloadAvailable,
                 (true, true) => SyncStatus::Conflict,
-                (false, false) => SyncStatus::InSync,
             }
         }
     }

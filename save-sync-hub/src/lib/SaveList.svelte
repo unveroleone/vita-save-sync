@@ -1,19 +1,29 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
+
   let {
     saves = [],
-    platform,
     message,
     onBackup,
     onDownload,
     onRestore,
   }: {
     saves: any[];
-    platform: string;
     message: string;
-    onBackup: (titleId: string, sourcePath: string) => void;
+    onBackup: (titleId: string, allPaths: string[]) => void;
     onDownload: (titleId: string) => void;
-    onRestore: (titleId: string, targetPath: string) => void;
+    onRestore: (titleId: string, restoreDir: string) => void;
   } = $props();
+
+  let grouped = $derived.by(() => {
+    const groups: Record<string, any[]> = {};
+    for (const s of saves) {
+      const label = s.source_label || "Saves";
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(s);
+    }
+    return Object.entries(groups);
+  });
 
   function statusLabel(s: string): string {
     switch (s) {
@@ -42,56 +52,59 @@
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
+
+  function iconUrl(path: string | null | undefined): string | null {
+    if (!path) return null;
+    try { return convertFileSrc(path); } catch { return null; }
+  }
 </script>
 
 <main class="content">
   <div class="header">
-    {platform === "psp" ? "PSP Saves" : platform === "retroarch" ? "RetroArch" : "Custom Path"}
+    Local Saves
     {#if saves.length > 0}
       <span class="count">{saves.length} entries</span>
     {/if}
   </div>
 
   {#if message}
-    <div class="message">{message}</div>
+    <div class="message" class:error={message.startsWith("Upload failed") || message.startsWith("Error")}>{message}</div>
   {/if}
 
   {#if saves.length === 0}
-    <div class="empty">No saves found. Select a platform and click Scan.</div>
+    <div class="empty">No saves found. Add a source and click Scan All.</div>
   {:else}
-    <div class="list">
-      {#each saves as save}
-        <div class="row">
-          <div class="info">
-            <span class="name">{save.name}</span>
-            <span class="meta">
-              {formatSize(save.size)} · {save.timestamp}
-            </span>
-          </div>
-          <div class="status">
-            <span
-              class="dot"
-              style="background: {statusColor(save.status)}"
-            ></span>
-            {statusLabel(save.status)}
-          </div>
-          <div class="actions">
-            <button
-              class="upload"
-              onclick={() => onBackup(save.title_id, save.source_path || "")}
-            >Upload</button>
-            <button
-              class="download"
-              onclick={() => onDownload(save.title_id)}
-            >Download</button>
-            <button
-              class="restore"
-              onclick={() => onRestore(save.title_id, save.source_path || "")}
-            >Restore</button>
-          </div>
+    {#each grouped as [label, entries]}
+      <div class="group">
+        <div class="group-header">{label}</div>
+        <div class="list">
+          {#each entries as save}
+            <div class="row">
+              {#if save.icon_path}
+                <div class="icon-wrap">
+                  <img src={iconUrl(save.icon_path)} alt="" class="icon" />
+                </div>
+              {/if}
+              <div class="info">
+                <span class="name">{save.name}</span>
+                <span class="meta">
+                  {formatSize(save.size)} · {save.timestamp}
+                </span>
+              </div>
+              <div class="status">
+                <span class="dot" style="background: {statusColor(save.status)}"></span>
+                {statusLabel(save.status)}
+              </div>
+              <div class="actions">
+                <button class="upload" onclick={() => onBackup(save.title_id, save.all_paths || [save.source_path])}>Upload</button>
+                <button class="download" onclick={() => onDownload(save.title_id)}>Download</button>
+                <button class="restore" onclick={() => onRestore(save.title_id, save.restore_dir || save.source_path || "")}>Restore</button>
+              </div>
+            </div>
+          {/each}
         </div>
-      {/each}
-    </div>
+      </div>
+    {/each}
   {/if}
 </main>
 
@@ -122,10 +135,25 @@
     margin-bottom: 12px;
     font-size: 0.85rem;
   }
+  .message.error {
+    color: #f44336;
+    background: #2a1a1a;
+  }
   .empty {
     color: #666;
     margin-top: 40px;
     text-align: center;
+  }
+  .group {
+    margin-bottom: 16px;
+  }
+  .group-header {
+    font-size: 0.75rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    padding-left: 2px;
   }
   .list {
     display: flex;
@@ -135,13 +163,26 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     padding: 10px 12px;
     background: #222;
     border-radius: 4px;
   }
   .row:hover {
     background: #2a2a2a;
+  }
+  .icon-wrap {
+    width: 48px;
+    min-width: 48px;
+    height: 32px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: #111;
+  }
+  .icon {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   .info {
     flex: 1;

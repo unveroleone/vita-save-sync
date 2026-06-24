@@ -1,90 +1,89 @@
 <script lang="ts">
-  let {
-    platform = $bindable("psp"),
-    customPath = $bindable(""),
-    serverUrl = $bindable(""),
-    apiToken = $bindable(""),
-    deviceName = $bindable(""),
-    resolvedPath = "",
-    loading = false,
-    onPlatformChange,
-    onBrowse,
-    onRefreshPath,
-    onSaveConfig,
-    onScan,
-  }: {
+  interface Source {
+    id: string;
     platform: string;
     customPath: string;
-    serverUrl: string;
-    apiToken: string;
-    deviceName: string;
+    label: string;
     resolvedPath: string;
+  }
+
+  let {
+    sources = $bindable([] as Source[]),
+    loading = false,
+    onBrowseSource,
+    onRemoveSource,
+    onRenameSource,
+    onAddCustom,
+    onScanAll,
+  }: {
+    sources: Source[];
     loading: boolean;
-    onPlatformChange: (p: string) => void;
-    onBrowse: () => void;
-    onRefreshPath: () => void;
-    onSaveConfig: () => void;
-    onScan: () => void;
+    onBrowseSource: (id: string) => void;
+    onRemoveSource: (id: string) => void;
+    onRenameSource: (id: string, label: string) => void;
+    onAddCustom: () => void;
+    onScanAll: () => void;
   } = $props();
 
-  function handlePlatform(e: Event) {
-    const val = (e.target as HTMLSelectElement).value;
-    onPlatformChange(val);
+  let editingId = $state<string | null>(null);
+  let editValue = $state("");
+
+  function startEdit(src: Source) {
+    editingId = src.id;
+    editValue = src.label;
+  }
+
+  function commitEdit() {
+    if (editingId && editValue.trim()) {
+      onRenameSource(editingId, editValue.trim());
+    }
+    editingId = null;
+    editValue = "";
+  }
+
+  function onEditKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") commitEdit();
+    if (e.key === "Escape") { editingId = null; editValue = ""; }
   }
 </script>
 
 <aside class="sidebar">
   <h1>Save Sync Hub</h1>
 
-  <section>
-    <label for="platform-select">Platform</label>
-    <select id="platform-select" value={platform} onchange={handlePlatform}>
-      <option value="psp">PSP (PPSSPP)</option>
-      <option value="retroarch">RetroArch</option>
-      <option value="custom">Custom path</option>
-    </select>
-
-    {#if platform === "custom"}
-      <div class="path-row">
-        <input
-          type="text"
-          bind:value={customPath}
-          placeholder="/path/to/saves"
-          onchange={() => onRefreshPath()}
-        />
-        <button class="browse" onclick={onBrowse}>...</button>
+  <div class="sources">
+    {#each sources as src}
+      <div class="source-card">
+        <div class="source-header">
+          {#if editingId === src.id}
+            <input
+              class="edit-input"
+              type="text"
+              bind:value={editValue}
+              onkeydown={onEditKeydown}
+              onblur={commitEdit}
+              autofocus
+            />
+          {:else}
+            <span class="source-label">{src.label}</span>
+            <button class="edit" onclick={() => startEdit(src)} title="Rename">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+            </button>
+          {/if}
+          <button class="remove" onclick={() => onRemoveSource(src.id)} title="Remove">&times;</button>
+        </div>
+        <div class="source-path">
+          <span class="path">{src.resolvedPath || "Not found"}</span>
+          <button class="browse" onclick={() => onBrowseSource(src.id)}>...</button>
+        </div>
       </div>
-    {:else}
-      <div class="path-info">
-        <span class="path-label">Resolved path:</span>
-        <span class="path-value">{resolvedPath}</span>
-        <button class="browse" onclick={onBrowse}>Browse...</button>
-      </div>
-    {/if}
-  </section>
+    {/each}
+  </div>
 
-  <button class="scan" onclick={onScan} disabled={loading}>
-    {loading ? "Scanning..." : "Scan Saves"}
+  <button class="add" onclick={onAddCustom}>+ Add Path</button>
+
+  <button class="scan" onclick={onScanAll} disabled={loading}>
+    {loading ? "Scanning..." : "Scan All"}
   </button>
-
-  <hr />
-
-  <section>
-    <label for="server-url">Server URL</label>
-    <input id="server-url" type="text" bind:value={serverUrl} placeholder="https://myserver.com" />
-  </section>
-
-  <section>
-    <label for="api-token">API Token</label>
-    <input id="api-token" type="password" bind:value={apiToken} placeholder="your-token" />
-  </section>
-
-  <section>
-    <label for="device-name">Device Name</label>
-    <input id="device-name" type="text" bind:value={deviceName} placeholder="my-pc" />
-  </section>
-
-  <button class="save" onclick={onSaveConfig}>Save Config</button>
 
   <div class="version">v0.1.0 · by unveroleone</div>
 </aside>
@@ -97,7 +96,7 @@
     padding: 20px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     overflow-y: auto;
   }
   h1 {
@@ -106,84 +105,107 @@
     color: #00b4d8;
     margin-bottom: 4px;
   }
-  section {
+  .sources {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
   }
-  label {
-    font-size: 0.75rem;
-    color: #999;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  select, input {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 6px 8px;
-    border-radius: 4px;
-    font-size: 0.85rem;
-  }
-  select:focus, input:focus {
-    outline: none;
-    border-color: #00b4d8;
-  }
-  .path-row {
-    display: flex;
-    gap: 4px;
-  }
-  .path-row input {
-    flex: 1;
-  }
-  .path-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+  .source-card {
     background: #1a1a1a;
     border: 1px solid #333;
     border-radius: 4px;
-    padding: 6px 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
-  .path-label {
-    font-size: 0.65rem;
-    color: #666;
-    text-transform: uppercase;
+  .source-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
-  .path-value {
-    font-size: 0.75rem;
+  .source-label {
+    flex: 1;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #ccc;
+  }
+  .edit-input {
+    flex: 1;
+    background: #111;
+    border: 1px solid #00b4d8;
+    color: #eee;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    outline: none;
+  }
+  button.edit {
+    background: transparent;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    padding: 2px;
+    line-height: 1;
+  }
+  button.edit:hover {
     color: #aaa;
+  }
+  .remove {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+  }
+  .remove:hover {
+    color: #f44336;
+  }
+  .source-path {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .path {
+    flex: 1;
+    font-size: 0.7rem;
+    color: #888;
     word-break: break-all;
-    margin-bottom: 4px;
   }
   button {
-    background: #00b4d8;
-    color: #111;
     border: none;
-    padding: 8px;
     border-radius: 4px;
-    font-weight: 600;
-    font-size: 0.85rem;
     cursor: pointer;
-  }
-  button:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
   button.browse {
     background: #333;
     color: #ccc;
-    padding: 4px 8px;
-    font-size: 0.75rem;
-    font-weight: 400;
+    padding: 2px 6px;
+    font-size: 0.7rem;
   }
-  button.save {
-    background: #444;
-    color: #eee;
+  button.add {
+    background: transparent;
+    color: #888;
+    border: 1px dashed #555;
+    padding: 6px;
+    font-size: 0.8rem;
   }
-  hr {
-    border: none;
-    border-top: 1px solid #333;
+  button.add:hover {
+    background: #222;
+    color: #aaa;
+  }
+  button.scan {
+    background: #00b4d8;
+    color: #111;
+    padding: 8px;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .version {
     margin-top: auto;

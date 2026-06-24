@@ -1,11 +1,15 @@
 import { FastifyInstance } from 'fastify';
 import { requireAuth, getUserName } from '../middleware/auth.js';
-import { readManifest, writeManifest, Manifest } from '../storage/disk.js';
+import { readManifest, writeManifest, countVersions, Manifest } from '../storage/disk.js';
 
 export async function manifestRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/manifest', { preHandler: requireAuth }, async (_req, reply) => {
     const userName = getUserName();
-    reply.send(readManifest(userName));
+    const manifest = readManifest(userName);
+    for (const titleId of Object.keys(manifest.games)) {
+      manifest.games[titleId].versionCount = countVersions(userName, titleId);
+    }
+    reply.send(manifest);
   });
 
   app.put<{ Body: Manifest }>(
