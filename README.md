@@ -5,18 +5,19 @@
 <h1 align="center">Save Sync</h1>
 
 <p align="center">
-  <em>Manual cloud save sync for modded PS Vitas and PSTVs, self-hosted</em>
+  <em>Self-hosted cloud save sync for PS Vita, PPSSPP, and RetroArch — across all your devices</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/v/release/unveroleone/vita-save-sync" alt="version">
   <img src="https://img.shields.io/badge/server-Node.js%20%7C%20Fastify-111111?style=flat-square" alt="Node.js">
-  <img src="https://img.shields.io/badge/client-Rust%20%2B%20vita2d-111111?style=flat-square" alt="Rust">
+  <img src="https://img.shields.io/badge/vita-Rust%20%2B%20vita2d-111111?style=flat-square" alt="Vita client">
+  <img src="https://img.shields.io/badge/desktop%20%2F%20android-Tauri%20v2%20%2B%20Svelte-111111?style=flat-square" alt="Desktop client">
   <img src="https://img.shields.io/badge/license-GPL--3.0-111111?style=flat-square" alt="GPL-3.0">
 </p>
 
 <p align="center">
-  <strong>Play on Vita A &middot; Upload &middot; Pull on Vita B &middot; Restore</strong><br>
+  <strong>Play anywhere &middot; Upload your save &middot; Restore on any device</strong><br>
   <sub>Forked from <a href="https://github.com/save-cloud">Save Cloud Vita</a>. Baidu Cloud replaced with a self-hosted HTTP API. All strings translated to English.</sub>
 </p>
 
@@ -24,26 +25,43 @@
 
 ## What it does
 
-- Backs up PS Vita save data to a zip locally, then uploads to your own server
-- Downloads saves from the server to another device
-- Restores downloaded saves (creates a safety backup first)
-- Shows per-game sync status on the Cloud tab
-- TLS via iTLS-Enso + rustls on Vita
+One server, multiple clients. All saves go to the same place.
 
-Requires HENkaku + iTLS-Enso on the Vita and the sync server running somewhere — a laptop, a Raspberry Pi, a home server, or any machine with Node.js or Docker.
+**PS Vita app** (Rust homebrew, runs on the Vita itself):
+- Backs up native PS Vita saves, PSP/Adrenaline saves, and RetroArch saves
+- Uploads to your server as a zip, downloads and restores on another Vita
+- Shows per-game sync status on the Cloud tab with one-tap Sync All
+- TLS via iTLS-Enso + rustls — no certificate warnings on the Vita
+
+**Save Sync Hub** (Tauri v2 + Svelte, runs on desktop and Android):
+- Syncs PPSSPP and RetroArch saves from macOS, Windows, Linux, and Android
+- Detects default save locations automatically per platform
+- Upload to server, download to local, or restore directly from cloud
+- Connects to the same server and same API as the Vita app
+
+---
+
+## Clients at a glance
+
+| Client | Runs on | Emulators / saves |
+|--------|---------|-------------------|
+| Save Sync (Vita app) | PS Vita, PSTV | Native Vita · PSP (Adrenaline) · RetroArch |
+| Save Sync Hub | macOS · Windows · Linux · Android | PPSSPP · RetroArch · Custom path |
+
+The Vita app requires HENkaku + iTLS-Enso. Save Sync Hub is a standard desktop/Android app — no jailbreak needed on the other end.
 
 ---
 
 ## Server setup
 
-The server is a small Node.js app. It stores save files on disk and exposes a REST API. You need to keep it running while you sync — it does not need to be on 24/7.
+The server is a small Node.js app. It stores save files on disk and exposes a REST API. You need to keep it running while you sync, it does not need to be on 24/7.
 
 Pick the option that fits your situation.
 
 ---
 
 <details>
-<summary><strong>Option A — Docker</strong> &nbsp;(recommended if you already have Docker)</summary>
+<summary><strong>Option A | Docker</strong></summary>
 
 <br>
 
@@ -89,7 +107,7 @@ Put the server behind Nginx Proxy Manager or Cloudflare Tunnel for HTTPS. The Vi
 ---
 
 <details>
-<summary><strong>Option B — Node.js directly</strong> &nbsp;(macOS, Windows, Linux — quickest to get started)</summary>
+<summary><strong>Option B | Node.js directly</strong> &nbsp;(quickest to get started)</summary>
 
 <br>
 
@@ -170,7 +188,7 @@ Check status: `sudo systemctl status vita-save-sync`
 ---
 
 <details>
-<summary><strong>Option D — Background service on your laptop</strong> &nbsp;(macOS / Linux / Windows)</summary>
+<summary><strong>Option D | Background service on your laptop</strong> &nbsp;(macOS / Linux / Windows)</summary>
 
 <br>
 
@@ -262,7 +280,41 @@ Install the VPK via [VitaDB Downloader](https://www.rinnegatamante.eu/vitadb/#/i
 
 ---
 
-## Workflow
+## Save Sync Hub (desktop / Android)
+
+Save Sync Hub is the companion app for PC and Android. It syncs PPSSPP and RetroArch saves using the same server and API token as the Vita app.
+
+Download the latest release from [GitHub Releases](https://github.com/unveroleone/vita-save-sync/releases) for your platform (`.dmg` for macOS, `.msi` for Windows, `.AppImage` for Linux, `.apk` for Android).
+
+### First-time setup
+
+1. Open Save Sync Hub
+2. In the sidebar, enter your **Server URL**, **API Token**, and **Device Name** — same values as on the Vita
+3. Click **Save Config**
+4. Select your platform (PSP / RetroArch / Custom path)
+5. The app auto-fills the default save folder for your OS — or browse to a custom path
+6. Click **Scan Saves** to list your save directories
+
+### Default save paths
+
+| Platform | PPSSPP | RetroArch |
+|----------|--------|-----------|
+| macOS | `~/Library/Application Support/ppsspp/PSP/SAVEDATA` | `~/Library/Application Support/RetroArch` |
+| Windows | `%APPDATA%\ppsspp\PSP\SAVEDATA` | `%APPDATA%\RetroArch` |
+| Linux | `~/.config/ppsspp/PSP/SAVEDATA` | `~/.config/retroarch` |
+| Android | `/storage/emulated/0/PSP/SAVEDATA` | `/storage/emulated/0/RetroArch` |
+
+### Workflow
+
+- **Upload** — zips the save folder and sends it to the server
+- **Download** — fetches the latest backup from the server to a local zip
+- **Restore** — downloads from the server and extracts directly into the save folder
+
+Save IDs on the server use the folder name as the title ID, prefixed with `PSP_` or `RA_` to avoid collisions with native Vita saves.
+
+---
+
+## Workflow (PS Vita)
 
 ### Uploading a save to the server
 
@@ -342,6 +394,7 @@ ux0:data/save-sync/
 ## Credits
 
 Forked from [Save Cloud Vita](https://github.com/save-cloud) by iamcco.
-Uses [VitaShell](https://github.com/TheOfficialFloW/VitaShell) SQLite VFS and kernel modules, [vita-rust](https://github.com/vita-rust), [VitaSDK](https://github.com/vitasdk).
+Vita app uses [VitaShell](https://github.com/TheOfficialFloW/VitaShell) SQLite VFS and kernel modules, [vita-rust](https://github.com/vita-rust), [VitaSDK](https://github.com/vitasdk).
+Save Sync Hub built with [Tauri v2](https://tauri.app) and [Svelte 5](https://svelte.dev).
 
 Built with the help of AI
