@@ -122,36 +122,34 @@ impl UITitles {
     }
 
     fn update_icons(&mut self, app_data: &mut AppData) {
-        // check icons
-        let size = app_data.titles.size() as i32;
+        let native_count = app_data.titles.size() as i32;
+        let total = self.total_size(app_data);
         let start_idx = (self.top_row - 1) * ICON_COL;
         let start_idx = if start_idx < 0 { 0 } else { start_idx };
         let end_idx = start_idx + ICON_COL * (ICON_ROW + 2);
-        let end_idx = if end_idx < size { end_idx } else { size };
+        let end_idx = if end_idx < total { end_idx } else { total };
 
+        // load native title icons
         for (idx, title) in app_data.titles.iter().enumerate() {
             if idx >= start_idx as usize && idx < end_idx as usize {
-                let has_icon = self.icons.contains_key(&(idx as u32));
+                let key = idx as u32;
+                let has_icon = self.icons.contains_key(&key);
                 if has_icon {
                     continue;
                 }
 
-                // check icon buf
                 if let Ok(mut icon_bufs) = self.icon_bufs.try_write() {
-                    if icon_bufs.contains_key(&(idx as u32)) {
-                        if let Some(buf) = icon_bufs.get(&(idx as u32)).expect("get icon bufs") {
-                            self.icons
-                                .insert(idx as u32, vita2d_load_png_buf(buf.as_slice()));
-                            icon_bufs.remove(&(idx as u32));
+                    if icon_bufs.contains_key(&key) {
+                        if let Some(buf) = icon_bufs.get(&key).expect("get icon bufs") {
+                            self.icons.insert(key, vita2d_load_png_buf(buf.as_slice()));
+                            icon_bufs.remove(&key);
                         }
                         drop(icon_bufs);
                         continue;
                     }
-                    // insert None
-                    icon_bufs.insert(idx as u32, None);
+                    icon_bufs.insert(key, None);
                     drop(icon_bufs);
 
-                    // load icon buf
                     let iconpath = title.iconpath().to_string();
                     let icon_bufs = Arc::clone(&self.icon_bufs);
                     tokio::spawn(async move {
@@ -161,7 +159,7 @@ impl UITitles {
                                     icon_bufs
                                         .write()
                                         .expect("get write lock of icon bufs in spawn")
-                                        .insert(idx as u32, Some(file));
+                                        .insert(key, Some(file));
                                 }
                                 Err(e) => {
                                     error!("app iconpath read failed {}: {}", iconpath, e);
@@ -175,6 +173,49 @@ impl UITitles {
             } else {
                 if self.icons.contains_key(&(idx as u32)) {
                     self.icons.remove(&(idx as u32));
+                }
+            }
+        }
+
+        // load emulator PSP icons
+        for (emu_idx, entry) in self.emulator_entries.iter().enumerate() {
+            let grid_idx = (native_count + emu_idx as i32) as u32;
+            if (grid_idx as i32) >= start_idx && (grid_idx as i32) < end_idx {
+                if let Some(ref icon_path) = entry.icon_path {
+                    let has_icon = self.icons.contains_key(&grid_idx);
+                    if has_icon {
+                        continue;
+                    }
+                    if let Ok(mut icon_bufs) = self.icon_bufs.try_write() {
+                        if icon_bufs.contains_key(&grid_idx) {
+                            if let Some(buf) = icon_bufs.get(&grid_idx).expect("get icon bufs") {
+                                self.icons.insert(grid_idx, vita2d_load_png_buf(buf.as_slice()));
+                                icon_bufs.remove(&grid_idx);
+                            }
+                            drop(icon_bufs);
+                            continue;
+                        }
+                        icon_bufs.insert(grid_idx, None);
+                        drop(icon_bufs);
+
+                        let path = icon_path.clone();
+                        let icon_bufs = Arc::clone(&self.icon_bufs);
+                        tokio::spawn(async move {
+                            if Path::new(&path).exists() {
+                                match fs::read(&path) {
+                                    Ok(file) => {
+                                        icon_bufs
+                                            .write()
+                                            .expect("get write lock of icon bufs in spawn")
+                                            .insert(grid_idx, Some(file));
+                                    }
+                                    Err(e) => {
+                                        error!("emu icon read failed {}: {}", path, e);
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -293,32 +334,48 @@ impl UITitles {
                 // emulator cell
                 let emu_idx = (icon_idx as i32 - native_count) as usize;
                 if let Some(entry) = self.emulator_entries.get(emu_idx) {
-                    let border_color = match entry.kind {
-                        EmulatorKind::Psp => rgba(0x00, 0xb4, 0xd8, 0xff),
-                        EmulatorKind::RetroArch => rgba(0xff, 0x77, 0x00, 0xff),
-                    };
-                    let border = 3;
-                    vita2d_draw_rect(x as f32, y as f32, cell_size as f32, cell_size as f32, border_color);
-                    vita2d_draw_rect(
-                        (x + border) as f32,
-                        (y + border) as f32,
-                        (cell_size - border * 2) as f32,
-                        (cell_size - border * 2) as f32,
-                        rgba(0x22, 0x22, 0x22, 0xff),
-                    );
-                    let label = match entry.kind {
-                        EmulatorKind::Psp => "PSP",
-                        EmulatorKind::RetroArch => "RA",
-                    };
-                    let lw = vita2d_text_width(1.0, label);
-                    let lh = vita2d_text_height(1.0, label);
-                    vita2d_draw_text(
-                        x + (cell_size - lw) / 2,
-                        y + (cell_size + lh) / 2,
-                        rgba(0xff, 0xff, 0xff, 0xff),
-                        1.0,
-                        label,
-                    );
+                    let has_icon = self.icons.contains_key(&icon_idx);
+                    if has_icon {
+                        // PSP icon: 144x80, scale to fit cell width, center vertically
+                        vita2d_draw_rect(x as f32, y as f32, cell_size as f32, cell_size as f32, icon_bg);
+                        let scale = cell_size as f32 / 144.0;
+                        let icon_h = (80.0 * scale) as i32;
+                        let y_off = (cell_size - icon_h) / 2;
+                        vita2d_draw_texture_scale(
+                            self.icons.get(&icon_idx).expect("get emu icon texture"),
+                            x as f32,
+                            (y + y_off) as f32,
+                            scale,
+                            scale,
+                        );
+                    } else {
+                        let border_color = match entry.kind {
+                            EmulatorKind::Psp => rgba(0x00, 0xb4, 0xd8, 0xff),
+                            EmulatorKind::RetroArch => rgba(0xff, 0x77, 0x00, 0xff),
+                        };
+                        let border = 3;
+                        vita2d_draw_rect(x as f32, y as f32, cell_size as f32, cell_size as f32, border_color);
+                        vita2d_draw_rect(
+                            (x + border) as f32,
+                            (y + border) as f32,
+                            (cell_size - border * 2) as f32,
+                            (cell_size - border * 2) as f32,
+                            rgba(0x22, 0x22, 0x22, 0xff),
+                        );
+                        let label = match entry.kind {
+                            EmulatorKind::Psp => "PSP",
+                            EmulatorKind::RetroArch => "RA",
+                        };
+                        let lw = vita2d_text_width(1.0, label);
+                        let lh = vita2d_text_height(1.0, label);
+                        vita2d_draw_text(
+                            x + (cell_size - lw) / 2,
+                            y + (cell_size + lh) / 2,
+                            rgba(0xff, 0xff, 0xff, 0xff),
+                            1.0,
+                            label,
+                        );
+                    }
                 }
             }
         }

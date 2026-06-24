@@ -14,6 +14,7 @@ pub struct EmulatorEntry {
     pub name: String,
     pub source_path: String,
     pub kind: EmulatorKind,
+    pub icon_path: Option<String>,
 }
 
 pub fn scan_emulator_entries() -> Vec<EmulatorEntry> {
@@ -26,10 +27,13 @@ pub fn scan_emulator_entries() -> Vec<EmulatorEntry> {
             .filter(|e| e.path().is_dir())
             .map(|e| {
                 let folder = e.file_name().to_string_lossy().to_string();
+                let source_path = format!("{}/{}", PSP_SAVE_DIR, folder);
+                let icon_path = Path::new(&source_path).join("ICON0.PNG");
                 EmulatorEntry {
                     id: format!("PSP_{}", folder),
                     name: format!("PSP: {}", folder),
-                    source_path: format!("{}/{}", PSP_SAVE_DIR, folder),
+                    icon_path: icon_path.exists().then(|| icon_path.to_string_lossy().to_string()),
+                    source_path,
                     kind: EmulatorKind::Psp,
                 }
             })
@@ -44,6 +48,7 @@ pub fn scan_emulator_entries() -> Vec<EmulatorEntry> {
             id: "RETROARCH".to_string(),
             name: "RetroArch".to_string(),
             source_path: RETROARCH_DIR.to_string(),
+            icon_path: None,
             kind: EmulatorKind::RetroArch,
         });
     }
