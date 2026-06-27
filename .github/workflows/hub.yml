@@ -19,15 +19,15 @@ jobs:
         include:
           - platform: macOS
             os: macos-latest
-            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target universal-apple-darwin
           - platform: Windows
             os: windows-latest
-            target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             args: ''
           - platform: Linux
             os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+            rust_targets: x86_64-unknown-linux-gnu
             args: ''
 
     steps:
@@ -55,7 +55,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+          targets: ${{ matrix.rust_targets }}
 
       - uses: swatinem/rust-cache@v2
         with:
