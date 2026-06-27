@@ -17,10 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macOS arm64
+          - platform: macOS
             os: macos-latest
-            target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
+            target: universal-apple-darwin
+            args: --target universal-apple-darwin
           - platform: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -55,7 +55,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
 
       - uses: swatinem/rust-cache@v2
         with:
