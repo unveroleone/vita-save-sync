@@ -32,6 +32,8 @@ One server, multiple clients. All saves go to the same place.
 - Uploads to your server as a zip, downloads and restores on another Vita
 - Shows per-game sync status on the Cloud tab with one-tap Sync All
 
+> **Note on native Vita saves:** PSP and RetroArch saves transfer reliably between devices. Native PS Vita saves are encrypted with a mix of your PSN account and hardware keys, so results vary. Same PSN account on both Vitas works for many titles but is not guaranteed for all. If a save does not load after restoring, use a tool like [Apollo Save Tool](https://github.com/bucanero/apollo-vita) to resign it.
+
 **Save Sync Hub** (Desktop / Android):
 - Syncs PPSSPP and RetroArch saves from macOS, Windows, Linux, and Android
 - Detects default save locations automatically per platform
